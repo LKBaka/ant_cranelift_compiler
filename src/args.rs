@@ -2,9 +2,9 @@ use clap::Parser;
 
 #[derive(Parser, Debug, Clone)]
 #[command(
-    name = "RustAnt",
+    name = "TypedAntCompiler",
     version = "0.1.0",
-    about = "AntScript on Rust",
+    about = "TypedAnt Compiler",
     long_about = None
 )]
 pub struct Args {
