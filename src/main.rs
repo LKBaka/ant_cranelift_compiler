@@ -1,5 +1,4 @@
+mod args;
 mod compiler;
 
-fn main() {
-    
-}
+fn main() {}

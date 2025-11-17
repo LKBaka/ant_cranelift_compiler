@@ -19,3 +19,8 @@ cranelift-frontend = "0.110.0"
 cranelift-object = "0.110.0"
 cc = "1.2.41"
 tempfile = "3.23.0"
+
+clap = { version = "4.5.47", features = ["derive"] }
+
+[features]
+debug = []

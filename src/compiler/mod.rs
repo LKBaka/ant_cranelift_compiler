@@ -14,6 +14,7 @@ use cranelift_codegen::{
 };
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext, Variable};
 use cranelift_module::{Linkage, Module, default_libcall_names};
+use cranelift_object::object::{Object, ObjectSymbol};
 use cranelift_object::{ObjectBuilder, ObjectModule};
 
 use ant_type_checker::typed_ast::{
@@ -255,8 +256,11 @@ mod tests {
         let compiler = Compiler::new(target_isa, "__simple_program__".into(), &mut table);
 
         // 解析ast
-        let tokens =
-            (&mut Lexer::new("if 0i64 {42i64} else if 1i64 {42i64} else {0i64}".into(), file.clone())).get_tokens();
+        let tokens = (&mut Lexer::new(
+            "if 0i64 {42i64} else if 1i64 {42i64} else {0i64}".into(),
+            file.clone(),
+        ))
+            .get_tokens();
 
         let node = (&mut Parser::new(tokens)).parse_program().unwrap();
 
