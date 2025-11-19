@@ -7,6 +7,7 @@ use clap::Parser;
     about = "TypedAnt Compiler",
     long_about = None
 )]
+
 pub struct Args {
     /// 输入文件路径（可选）
     #[arg(short, long)]

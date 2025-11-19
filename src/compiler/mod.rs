@@ -42,6 +42,7 @@ pub struct Compiler<'table> {
 
 pub struct CompilerState<'a> {
     pub builder: FunctionBuilder<'a>,
+    pub module: &'a mut ObjectModule,
     pub table: &'a mut SymbolTable,
 }
 
@@ -106,6 +107,72 @@ impl<'table> Compiler<'table> {
                 } else {
                     Err(format!("undefined variable: {}", it.value))
                 }
+            }
+
+            TypedExpression::Function {
+                name,
+                params,
+                block: block_ast,
+                ret_ty,
+                ty,
+                ..
+            } => {
+                let mut converted_params = vec![];
+
+                for param in params {
+                    converted_params.push(AbiParam::new(convert_type_to_cranelift_type(
+                        &param.get_type(),
+                    )));
+                }
+
+                let mut ctx = state.module.make_context();
+                ctx.func.signature.params.append(&mut converted_params);
+                ctx.func
+                    .signature
+                    .returns
+                    .push(AbiParam::new(convert_type_to_cranelift_type(
+                        &block_ast.get_type(),
+                    )));
+
+                if let Some(name) = name.as_ref() {
+                    let name = &name.value;
+
+                    let func_id = match state.module.declare_function(
+                        &name,
+                        Linkage::Export,
+                        &ctx.func.signature,
+                    ) {
+                        Ok(it) => it,
+                        Err(it) => Err(it.to_string())?,
+                    };
+
+                    let mut bcx = FunctionBuilderContext::new();
+                    let mut bx = FunctionBuilder::new(&mut ctx.func, &mut bcx);
+                    let block = bx.create_block();
+                    bx.append_block_params_for_function_params(block);
+                    bx.switch_to_block(block);
+                    
+                    for param in params {
+                        if let TypedExpression::TypeHint(name, _, ty) = &**param {
+                            let symbol = state.table.define(&name.value);
+
+                        let cranelift_ty = convert_type_to_cranelift_type(ty);
+                        state
+                            .builder
+                            .declare_var(Variable::from_u32(symbol.index as u32), cranelift_ty);
+                        }
+                    }
+
+                    let result = Self::compile_stmt(state, block_ast)?;
+
+                    bx.ins().return_(&[result]);
+                    bx.finalize();
+
+                    state.module.define_function(func_id, &mut ctx);
+                    state.module.clear_context(&mut ctx);
+                }
+
+                todo!()
             }
 
             TypedExpression::If {
@@ -200,6 +267,7 @@ impl<'table> Compiler<'table> {
 
             let mut state = CompilerState {
                 builder,
+                module: &mut self.module,
                 table: self.table,
             };
 
