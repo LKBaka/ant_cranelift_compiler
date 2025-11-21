@@ -4,6 +4,7 @@ pub mod table;
 
 use std::{collections::HashMap, fs, path::Path, rc::Rc, sync::Arc};
 
+use ant_type_checker::Ty;
 use ant_type_checker::typed_ast::GetType;
 use cranelift::codegen::ir::InstBuilder;
 use cranelift::prelude::{AbiParam, Signature, Value, types};
@@ -21,6 +22,7 @@ use ant_type_checker::typed_ast::{
     typed_expr::TypedExpression, typed_node::TypedNode, typed_stmt::TypedStatement,
 };
 
+use crate::compiler::imm::platform_width_to_int_type;
 use crate::compiler::{
     convert_type::convert_type_to_cranelift_type, imm::int_value_to_imm, table::SymbolTable,
 };
@@ -44,6 +46,7 @@ pub struct CompilerState<'a> {
     pub builder: FunctionBuilder<'a>,
     pub module: &'a mut ObjectModule,
     pub table: &'a mut SymbolTable,
+    pub function_map: &'a mut HashMap<String, cranelift_module::FuncId>,
 }
 
 impl<'table> Compiler<'table> {
@@ -90,6 +93,17 @@ impl<'table> Compiler<'table> {
 
                 Ok(val)
             }
+
+            TypedStatement::Block { statements: it, .. } => {
+                let mut ret_val = state.builder.ins().iconst(types::I64, 0);
+
+                for stmt in it {
+                    ret_val = Self::compile_stmt(state, &stmt)?;
+                }
+
+                Ok(ret_val)
+            }
+
             _ => todo!("impl function 'compile_stmt'"),
         }
     }
@@ -113,7 +127,6 @@ impl<'table> Compiler<'table> {
                 name,
                 params,
                 block: block_ast,
-                ret_ty,
                 ty,
                 ..
             } => {
@@ -137,6 +150,8 @@ impl<'table> Compiler<'table> {
                 if let Some(name) = name.as_ref() {
                     let name = &name.value;
 
+                    let func_symbol = state.table.define(&name);
+
                     let func_id = match state.module.declare_function(
                         &name,
                         Linkage::Export,
@@ -146,33 +161,128 @@ impl<'table> Compiler<'table> {
                         Err(it) => Err(it.to_string())?,
                     };
 
-                    let mut bcx = FunctionBuilderContext::new();
-                    let mut bx = FunctionBuilder::new(&mut ctx.func, &mut bcx);
-                    let block = bx.create_block();
-                    bx.append_block_params_for_function_params(block);
-                    bx.switch_to_block(block);
-                    
-                    for param in params {
-                        if let TypedExpression::TypeHint(name, _, ty) = &**param {
-                            let symbol = state.table.define(&name.value);
+                    // 创建新的编译上下文来编译这个函数
+                    let mut func_builder_ctx = FunctionBuilderContext::new();
+                    let mut func_builder =
+                        FunctionBuilder::new(&mut ctx.func, &mut func_builder_ctx);
 
-                        let cranelift_ty = convert_type_to_cranelift_type(ty);
-                        state
-                            .builder
-                            .declare_var(Variable::from_u32(symbol.index as u32), cranelift_ty);
+                    let entry_block = func_builder.create_block();
+                    func_builder.append_block_params_for_function_params(entry_block);
+                    func_builder.switch_to_block(entry_block);
+                    func_builder.seal_block(entry_block);
+
+                    // 在新的符号表上下文中编译函数体
+                    let mut func_symbol_table = SymbolTable::new();
+
+                    // 声明参数变量
+                    for (i, param) in params.iter().enumerate() {
+                        if let TypedExpression::TypeHint(param_name, _, ty) = &**param {
+                            let symbol = func_symbol_table.define(&param_name.value);
+                            let cranelift_ty = convert_type_to_cranelift_type(ty);
+
+                            // 使用函数内部的 builder
+                            func_builder
+                                .declare_var(Variable::from_u32(symbol.index as u32), cranelift_ty);
+
+                            // 将块参数绑定到变量
+                            let param_value = func_builder.block_params(entry_block)[i];
+                            func_builder
+                                .def_var(Variable::from_u32(symbol.index as u32), param_value);
                         }
                     }
 
-                    let result = Self::compile_stmt(state, block_ast)?;
+                    // 创建函数编译状态 - 使用函数内部的 builder
+                    let mut func_state = CompilerState {
+                        builder: func_builder,
+                        module: state.module,
+                        table: &mut func_symbol_table,
+                        function_map: state.function_map,
+                    };
 
-                    bx.ins().return_(&[result]);
-                    bx.finalize();
+                    // 编译函数体
+                    let result = Self::compile_stmt(&mut func_state, block_ast)?;
 
-                    state.module.define_function(func_id, &mut ctx);
+                    // 返回结果
+                    func_state.builder.ins().return_(&[result]);
+                    func_state.builder.finalize();
+
+                    let _ = state.module.define_function(func_id, &mut ctx);
                     state.module.clear_context(&mut ctx);
+
+                    // 获取函数的 FuncRef
+                    let func_ref = state
+                        .module
+                        .declare_func_in_func(func_id, &mut state.builder.func);
+
+                    let ref_val = state
+                        .builder
+                        .ins()
+                        .func_addr(platform_width_to_int_type(), func_ref);
+
+                    state.builder.declare_var(
+                        Variable::from_u32(func_symbol.index as u32),
+                        platform_width_to_int_type(),
+                    );
+                    state
+                        .builder
+                        .def_var(Variable::from_u32(func_symbol.index as u32), ref_val.clone());
+
+                    return Ok(ref_val);
                 }
 
                 todo!()
+            }
+
+            TypedExpression::Call {
+                func,
+                args,
+                func_ty,
+                ..
+            } => {
+                let (params_type, ret_ty) = match func_ty {
+                    Ty::Function {
+                        params_type,
+                        ret_type,
+                    } => (params_type, ret_type),
+                    _ => unreachable!(),
+                };
+
+                let func_val = Self::compile_expr(state, &func)?;
+
+                // 编译所有参数
+                let mut arg_values = Vec::new();
+
+                for arg in args {
+                    let arg_val = Self::compile_expr(state, arg)?;
+                    arg_values.push(arg_val);
+                }
+
+                // 创建函数签名
+                let mut sig = Signature::new(CallConv::SystemV);
+
+                for param_ty in params_type {
+                    sig.params
+                        .push(AbiParam::new(convert_type_to_cranelift_type(param_ty)));
+                }
+
+                sig.returns
+                    .push(AbiParam::new(convert_type_to_cranelift_type(ret_ty)));
+
+                // 导入签名
+                let sig_ref = state.builder.import_signature(sig);
+
+                // 生成间接调用指令
+                let call_inst = state
+                    .builder
+                    .ins()
+                    .call_indirect(sig_ref, func_val, &arg_values);
+
+                let results = state.builder.inst_results(call_inst);
+                if results.is_empty() {
+                    Ok(state.builder.ins().iconst(platform_width_to_int_type(), 0))
+                } else {
+                    Ok(results[0])
+                }
             }
 
             TypedExpression::If {
@@ -269,6 +379,7 @@ impl<'table> Compiler<'table> {
                 builder,
                 module: &mut self.module,
                 table: self.table,
+                function_map: &mut self.function_map,
             };
 
             for stmt in statements {
@@ -302,7 +413,7 @@ pub fn create_target_isa() -> Arc<dyn TargetIsa> {
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
+    use std::{cell::RefCell, path::Path, rc::Rc};
 
     use ant_lexer::Lexer;
     use ant_parser::Parser;
@@ -325,14 +436,15 @@ mod tests {
 
         // 解析ast
         let tokens = (&mut Lexer::new(
-            "if 0i64 {42i64} else if 1i64 {42i64} else {0i64}".into(),
+            // "if 0i64 {42i64} else if 1i64 {42i64} else {0i64}".into(),
+            "func f() -> i64 {0i64}; f()".into(),
             file.clone(),
         ))
             .get_tokens();
 
         let node = (&mut Parser::new(tokens)).parse_program().unwrap();
 
-        let typed_node = (&mut TypeChecker::new(&mut TypeTable::new()))
+        let typed_node = (&mut TypeChecker::new(Rc::new(RefCell::new(TypeTable::new()))))
             .check_node(node)
             .unwrap();
 

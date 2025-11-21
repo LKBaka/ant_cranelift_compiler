@@ -17,6 +17,6 @@ pub fn convert_type_to_cranelift_type(ty: &Ty) -> types::Type {
             IntTy::U16 => types::I16,
             IntTy::U8 => types::I8,
         }
-        _ => todo!()
+        _ => todo!("impl ty {ty}")
     }
 }
