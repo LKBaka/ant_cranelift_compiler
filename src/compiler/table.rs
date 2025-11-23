@@ -75,4 +75,22 @@ impl SymbolTable {
 
         symbol
     }
+
+    pub fn find(&self, def_index: usize) -> Option<Symbol> {
+        let symbols = self.map
+            .values()
+            .filter(|it| it.index == def_index)
+            .map(|it| it.clone())
+            .collect::<Vec<Symbol>>();
+
+        if !symbols.is_empty() {
+            return Some(symbols[0].clone())
+        }
+
+        if let Some(outer) = &self.outer {
+            return outer.borrow().find(def_index);
+        }
+
+        None
+    }
 }

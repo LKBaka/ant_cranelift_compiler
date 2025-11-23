@@ -1,13 +1,16 @@
 mod convert_type;
+pub mod handler;
 mod imm;
 pub mod table;
 
+use std::cell::RefCell;
 use std::{collections::HashMap, fs, path::Path, rc::Rc, sync::Arc};
 
 use ant_type_checker::Ty;
 use ant_type_checker::typed_ast::GetType;
 use cranelift::codegen::ir::InstBuilder;
 use cranelift::prelude::{AbiParam, Signature, Value, types};
+use cranelift_codegen::ir::FuncRef;
 use cranelift_codegen::{
     ir::{Function, UserFuncName},
     isa::{CallConv, TargetIsa},
@@ -15,20 +18,20 @@ use cranelift_codegen::{
 };
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext, Variable};
 use cranelift_module::{Linkage, Module, default_libcall_names};
-use cranelift_object::object::{Object, ObjectSymbol};
 use cranelift_object::{ObjectBuilder, ObjectModule};
 
 use ant_type_checker::typed_ast::{
     typed_expr::TypedExpression, typed_node::TypedNode, typed_stmt::TypedStatement,
 };
 
+use crate::compiler::handler::compile_infix::compile_infix;
 use crate::compiler::imm::platform_width_to_int_type;
 use crate::compiler::{
     convert_type::convert_type_to_cranelift_type, imm::int_value_to_imm, table::SymbolTable,
 };
 
 // 编译器结构体
-pub struct Compiler<'table> {
+pub struct Compiler {
     module: ObjectModule,
 
     builder_ctx: FunctionBuilderContext,
@@ -39,22 +42,22 @@ pub struct Compiler<'table> {
 
     target_isa: Arc<dyn TargetIsa>,
 
-    table: &'table mut SymbolTable,
+    table: Rc<RefCell<SymbolTable>>,
 }
 
 pub struct CompilerState<'a> {
     pub builder: FunctionBuilder<'a>,
     pub module: &'a mut ObjectModule,
-    pub table: &'a mut SymbolTable,
+    pub table: Rc<RefCell<SymbolTable>>,
     pub function_map: &'a mut HashMap<String, cranelift_module::FuncId>,
 }
 
-impl<'table> Compiler<'table> {
+impl Compiler {
     pub fn new(
         target_isa: Arc<dyn TargetIsa>,
         file: Rc<str>,
-        table: &'table mut SymbolTable,
-    ) -> Compiler<'table> {
+        table: Rc<RefCell<SymbolTable>>,
+    ) -> Compiler {
         // 创建 ObjectModule
         let builder =
             ObjectBuilder::new(target_isa.clone(), file.as_bytes(), default_libcall_names())
@@ -81,7 +84,7 @@ impl<'table> Compiler<'table> {
             } => {
                 let val = Self::compile_expr(state, value)?;
 
-                let symbol = state.table.define(&name.value);
+                let symbol = state.table.borrow_mut().define(&name.value);
 
                 let cranelift_ty = convert_type_to_cranelift_type(ty);
                 state
@@ -116,7 +119,7 @@ impl<'table> Compiler<'table> {
                 .iconst(convert_type_to_cranelift_type(ty), int_value_to_imm(value))),
 
             TypedExpression::Ident(it, _) => {
-                if let Some(var) = state.table.get(&it.value) {
+                if let Some(var) = state.table.borrow().get(&it.value) {
                     Ok(state.builder.use_var(Variable::from_u32(var.index as u32)))
                 } else {
                     Err(format!("undefined variable: {}", it.value))
@@ -127,7 +130,6 @@ impl<'table> Compiler<'table> {
                 name,
                 params,
                 block: block_ast,
-                ty,
                 ..
             } => {
                 let mut converted_params = vec![];
@@ -139,19 +141,22 @@ impl<'table> Compiler<'table> {
                 }
 
                 let mut ctx = state.module.make_context();
+                ctx.func.signature = Signature::new(CallConv::SystemV);
                 ctx.func.signature.params.append(&mut converted_params);
-                ctx.func
-                    .signature
-                    .returns
-                    .push(AbiParam::new(convert_type_to_cranelift_type(
-                        &block_ast.get_type(),
-                    )));
+
+                if block_ast.get_type() != Ty::Unit {
+                    ctx.func
+                        .signature
+                        .returns
+                        .push(AbiParam::new(convert_type_to_cranelift_type(
+                            &block_ast.get_type(),
+                        )));
+                }
 
                 if let Some(name) = name.as_ref() {
                     let name = &name.value;
 
-                    let func_symbol = state.table.define(&name);
-
+                    // 1. 首先声明函数
                     let func_id = match state.module.declare_function(
                         &name,
                         Linkage::Export,
@@ -161,55 +166,10 @@ impl<'table> Compiler<'table> {
                         Err(it) => Err(it.to_string())?,
                     };
 
-                    // 创建新的编译上下文来编译这个函数
-                    let mut func_builder_ctx = FunctionBuilderContext::new();
-                    let mut func_builder =
-                        FunctionBuilder::new(&mut ctx.func, &mut func_builder_ctx);
+                    // 2. 立即将函数ID注册到function_map中
+                    state.function_map.insert(name.to_string(), func_id);
 
-                    let entry_block = func_builder.create_block();
-                    func_builder.append_block_params_for_function_params(entry_block);
-                    func_builder.switch_to_block(entry_block);
-                    func_builder.seal_block(entry_block);
-
-                    // 在新的符号表上下文中编译函数体
-                    let mut func_symbol_table = SymbolTable::new();
-
-                    // 声明参数变量
-                    for (i, param) in params.iter().enumerate() {
-                        if let TypedExpression::TypeHint(param_name, _, ty) = &**param {
-                            let symbol = func_symbol_table.define(&param_name.value);
-                            let cranelift_ty = convert_type_to_cranelift_type(ty);
-
-                            // 使用函数内部的 builder
-                            func_builder
-                                .declare_var(Variable::from_u32(symbol.index as u32), cranelift_ty);
-
-                            // 将块参数绑定到变量
-                            let param_value = func_builder.block_params(entry_block)[i];
-                            func_builder
-                                .def_var(Variable::from_u32(symbol.index as u32), param_value);
-                        }
-                    }
-
-                    // 创建函数编译状态 - 使用函数内部的 builder
-                    let mut func_state = CompilerState {
-                        builder: func_builder,
-                        module: state.module,
-                        table: &mut func_symbol_table,
-                        function_map: state.function_map,
-                    };
-
-                    // 编译函数体
-                    let result = Self::compile_stmt(&mut func_state, block_ast)?;
-
-                    // 返回结果
-                    func_state.builder.ins().return_(&[result]);
-                    func_state.builder.finalize();
-
-                    let _ = state.module.define_function(func_id, &mut ctx);
-                    state.module.clear_context(&mut ctx);
-
-                    // 获取函数的 FuncRef
+                    // 3. 在编译函数体之前就获取FuncRef
                     let func_ref = state
                         .module
                         .declare_func_in_func(func_id, &mut state.builder.func);
@@ -219,13 +179,88 @@ impl<'table> Compiler<'table> {
                         .ins()
                         .func_addr(platform_width_to_int_type(), func_ref);
 
+                    // 4. 定义外部作用域的符号
+                    let func_symbol = state.table.borrow_mut().define(&name);
                     state.builder.declare_var(
                         Variable::from_u32(func_symbol.index as u32),
                         platform_width_to_int_type(),
                     );
+                    state.builder.def_var(
+                        Variable::from_u32(func_symbol.index as u32),
+                        ref_val.clone(),
+                    );
+
+                    // 5. 创建新的编译上下文
+                    let mut func_builder_ctx = FunctionBuilderContext::new();
+                    let mut func_builder =
+                        FunctionBuilder::new(&mut ctx.func, &mut func_builder_ctx);
+
+                    let entry_block = func_builder.create_block();
+                    func_builder.append_block_params_for_function_params(entry_block);
+                    func_builder.switch_to_block(entry_block);
+                    func_builder.seal_block(entry_block);
+
+                    // 6. 创建函数内部的符号表
+                    let func_symbol_table =
+                        Rc::new(RefCell::new(SymbolTable::from_outer(state.table.clone())));
+
+                    // 7. 在函数内部符号表中也定义这个函数 - 修正这里！
+                    let inner_func_symbol = func_symbol_table.borrow_mut().define(&name);
+                    func_builder.declare_var(
+                        Variable::from_u32(inner_func_symbol.index as u32),
+                        platform_width_to_int_type(),
+                    );
+
+                    // 在函数内部重新创建FuncRef和对应的Value
+                    let inner_func_ref = state
+                        .module
+                        .declare_func_in_func(func_id, &mut func_builder.func);
+                    let inner_ref_val = func_builder
+                        .ins()
+                        .func_addr(platform_width_to_int_type(), inner_func_ref);
+                    func_builder.def_var(
+                        Variable::from_u32(inner_func_symbol.index as u32),
+                        inner_ref_val, // 使用内部创建的Value
+                    );
+
+                    // 8. 声明参数变量
+                    for (i, param) in params.iter().enumerate() {
+                        if let TypedExpression::TypeHint(param_name, _, ty) = &**param {
+                            let symbol = func_symbol_table.borrow_mut().define(&param_name.value);
+                            let cranelift_ty = convert_type_to_cranelift_type(ty);
+
+                            func_builder
+                                .declare_var(Variable::from_u32(symbol.index as u32), cranelift_ty);
+
+                            let param_value = func_builder.block_params(entry_block)[i];
+                            func_builder
+                                .def_var(Variable::from_u32(symbol.index as u32), param_value);
+                        }
+                    }
+
+                    // 9. 编译函数体
+                    let mut func_state = CompilerState {
+                        builder: func_builder,
+                        module: state.module,
+                        table: func_symbol_table,
+                        function_map: state.function_map,
+                    };
+
+                    let result = Self::compile_stmt(&mut func_state, block_ast)?;
+
+                    if block_ast.get_type() != Ty::Unit {
+                        func_state.builder.ins().return_(&[result]);
+                    } else {
+                        func_state.builder.ins().return_(&[]);
+                    }
+
+                    func_state.builder.finalize();
+
                     state
-                        .builder
-                        .def_var(Variable::from_u32(func_symbol.index as u32), ref_val.clone());
+                        .module
+                        .define_function(func_id, &mut ctx)
+                        .map_or_else(|err| Err(err.to_string()), |_| Ok(()))?;
+                    state.module.clear_context(&mut ctx);
 
                     return Ok(ref_val);
                 }
@@ -247,6 +282,21 @@ impl<'table> Compiler<'table> {
                     _ => unreachable!(),
                 };
 
+                let direct_func: Option<FuncRef> = if let TypedExpression::Ident(ident, _) = &**func
+                {
+                    state
+                        .function_map
+                        .get(&ident.value.to_string())
+                        .copied()
+                        .map(|fid| {
+                            state
+                                .module
+                                .declare_func_in_func(fid, &mut state.builder.func)
+                        })
+                } else {
+                    None
+                };
+
                 let func_val = Self::compile_expr(state, &func)?;
 
                 // 编译所有参数
@@ -257,6 +307,19 @@ impl<'table> Compiler<'table> {
                     arg_values.push(arg_val);
                 }
 
+                if let Some(fref) = direct_func {
+                    // 直接 call
+                    let call = state.builder.ins().call(fref, &arg_values);
+                    return Ok(state
+                        .builder
+                        .inst_results(call)
+                        .first()
+                        .copied()
+                        .unwrap_or_else(|| {
+                            state.builder.ins().iconst(platform_width_to_int_type(), 0)
+                        }));
+                }
+
                 // 创建函数签名
                 let mut sig = Signature::new(CallConv::SystemV);
 
@@ -265,8 +328,10 @@ impl<'table> Compiler<'table> {
                         .push(AbiParam::new(convert_type_to_cranelift_type(param_ty)));
                 }
 
-                sig.returns
-                    .push(AbiParam::new(convert_type_to_cranelift_type(ret_ty)));
+                if **ret_ty != Ty::Unit {
+                    sig.returns
+                        .push(AbiParam::new(convert_type_to_cranelift_type(ret_ty)));
+                }
 
                 // 导入签名
                 let sig_ref = state.builder.import_signature(sig);
@@ -336,6 +401,9 @@ impl<'table> Compiler<'table> {
                 Ok(end_val)
             }
 
+            TypedExpression::Infix {
+                op, left, right, ..
+            } => compile_infix(state, op.clone(), left, right),
             TypedExpression::Block(it, _) => {
                 let mut ret_val = state.builder.ins().iconst(types::I64, 0);
 
@@ -387,6 +455,17 @@ impl<'table> Compiler<'table> {
             }
 
             state.builder.ins().return_(&[ret_val]);
+
+            #[cfg(debug_assertions)]
+            {
+                let func_ref = &state.builder.func;
+                eprintln!("=== before finalize:\n{}", {
+                    let mut s = String::new();
+                    cranelift::codegen::write_function(&mut s, func_ref).unwrap();
+                    s
+                });
+            }
+
             state.builder.finalize();
         }
 
@@ -430,14 +509,31 @@ mod tests {
         let target_isa = create_target_isa();
 
         // 创建编译器实例
-        let mut table = SymbolTable::new();
+        let table = SymbolTable::new();
 
-        let compiler = Compiler::new(target_isa, "__simple_program__".into(), &mut table);
+        let compiler = Compiler::new(
+            target_isa,
+            "__simple_program__".into(),
+            Rc::new(RefCell::new(table)),
+        );
 
         // 解析ast
         let tokens = (&mut Lexer::new(
             // "if 0i64 {42i64} else if 1i64 {42i64} else {0i64}".into(),
-            "func f() -> i64 {0i64}; f()".into(),
+            // "1i64 + 2i64 * 3i64 - 4i64".into(),
+            r#"
+            func fib(n: i64) -> i64 {
+                if n == 0i64 {
+                    0i64
+                } else if n == 1i64 {
+                    1i64
+                } else {
+                    fib(n - 1i64) + fib(n - 2i64)
+                }
+            }
+            fib(40i64)
+            "#
+            .into(),
             file.clone(),
         ))
             .get_tokens();

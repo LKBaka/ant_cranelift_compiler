@@ -1,4 +1,9 @@
 [package]
+name = "antc"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
 name = "ant_cranelift_compiler"
 version = "0.1.0"
 edition = "2024"

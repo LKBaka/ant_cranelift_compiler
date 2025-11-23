@@ -65,7 +65,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "ant_cranelift_compiler"
+name = "antc"
 version = "0.1.0"
 dependencies = [
  "ast",
@@ -99,7 +99,7 @@ checksum = "c3d036a3c4ab069c7b410a2ce876bd74808d2d0888a82667669f8e783a898bf1"
 [[package]]
 name = "ast"
 version = "0.1.0"
-source = "git+https://github.com/LKBaka/TypedAnt.git#316646482e38b61fc6545e9090e2af42fabe1392"
+source = "git+https://github.com/LKBaka/TypedAnt.git#6cced710145f552b716ea43731190f81025ad686"
 dependencies = [
  "bigdecimal",
  "token",
@@ -471,7 +471,7 @@ checksum = "a6cb138bb79a146c1bd460005623e142ef0181e3d0219cb493e02f7d08a35695"
 [[package]]
 name = "lexer"
 version = "0.1.0"
-source = "git+https://github.com/LKBaka/TypedAnt.git#316646482e38b61fc6545e9090e2af42fabe1392"
+source = "git+https://github.com/LKBaka/TypedAnt.git#6cced710145f552b716ea43731190f81025ad686"
 dependencies = [
  "colored",
  "token",
@@ -586,7 +586,7 @@ checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 [[package]]
 name = "parser"
 version = "0.1.0"
-source = "git+https://github.com/LKBaka/TypedAnt.git#316646482e38b61fc6545e9090e2af42fabe1392"
+source = "git+https://github.com/LKBaka/TypedAnt.git#6cced710145f552b716ea43731190f81025ad686"
 dependencies = [
  "ast",
  "colored",
@@ -807,7 +807,7 @@ dependencies = [
 [[package]]
 name = "token"
 version = "0.1.0"
-source = "git+https://github.com/LKBaka/TypedAnt.git#316646482e38b61fc6545e9090e2af42fabe1392"
+source = "git+https://github.com/LKBaka/TypedAnt.git#6cced710145f552b716ea43731190f81025ad686"
 dependencies = [
  "phf",
 ]
@@ -845,7 +845,7 @@ dependencies = [
 [[package]]
 name = "type_checker"
 version = "0.1.0"
-source = "git+https://github.com/LKBaka/TypedAnt.git#316646482e38b61fc6545e9090e2af42fabe1392"
+source = "git+https://github.com/LKBaka/TypedAnt.git#6cced710145f552b716ea43731190f81025ad686"
 dependencies = [
  "ast",
  "bigdecimal",
@@ -874,7 +874,7 @@ checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
 [[package]]
 name = "utils"
 version = "0.1.0"
-source = "git+https://github.com/LKBaka/TypedAnt.git#316646482e38b61fc6545e9090e2af42fabe1392"
+source = "git+https://github.com/LKBaka/TypedAnt.git#6cced710145f552b716ea43731190f81025ad686"
 
 [[package]]
 name = "version_check"
