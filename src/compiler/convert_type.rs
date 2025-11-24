@@ -17,6 +17,7 @@ pub fn convert_type_to_cranelift_type(ty: &Ty) -> types::Type {
             IntTy::U16 => types::I16,
             IntTy::U8 => types::I8,
         }
+        Ty::Bool => types::I8, // cranelift 没有比 i8 更小的类型了
         _ => todo!("impl ty {ty}")
     }
 }

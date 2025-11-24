@@ -118,6 +118,11 @@ impl Compiler {
                 .ins()
                 .iconst(convert_type_to_cranelift_type(ty), int_value_to_imm(value))),
 
+            TypedExpression::Bool { value, ty, .. } => Ok(state
+                .builder
+                .ins()
+                .iconst(convert_type_to_cranelift_type(ty), *value as i64)),
+
             TypedExpression::Ident(it, _) => {
                 if let Some(var) = state.table.borrow().get(&it.value) {
                     Ok(state.builder.use_var(Variable::from_u32(var.index as u32)))
