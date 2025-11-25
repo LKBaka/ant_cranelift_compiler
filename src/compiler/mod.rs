@@ -615,7 +615,7 @@ pub fn compile_to_executable(
         .to_command()
         .arg("-o")
         .arg(output_path.to_str().unwrap()) // 输出文件名
-        .arg(&lib_name) // 刚才 Cranelift 生成的 .o
+        .arg(output_path.parent().unwrap().join(&lib_name)) // 刚才 Cranelift 生成的 .o
         .status()
         .expect("link failed");
 

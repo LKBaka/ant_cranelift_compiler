@@ -1,0 +1,11 @@
+func fib(n: i64) -> i64 {
+    if n == 0i64 {
+        0i64
+    } else if n == 1i64 {
+        1i64
+    } else {
+        fib(n - 1i64) + fib(n - 2i64)
+    }
+}
+
+fib(40i64)

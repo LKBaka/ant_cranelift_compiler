@@ -1,12 +1,102 @@
-use clap::Parser;
+use std::{cell::RefCell, fs, path::PathBuf, rc::Rc};
+
+use ant_cranelift_compiler::compiler::{
+    Compiler, compile_to_executable, create_target_isa, table::SymbolTable,
+};
+use ant_lexer::Lexer;
+use ant_parser::{Parser, error::display_err};
+
+use ant_type_checker::{TypeChecker, table::TypeTable};
+use clap::Parser as ClapParser;
 
 use crate::args::Args;
 
 mod args;
 mod compiler;
 
+fn compile(arg: Args) {
+    let file_rc: Rc<str> = arg.file.clone().into();
+    let file = PathBuf::from(arg.file);
+
+    if !file.exists() {
+        panic!("file is not exists: {}", file.to_string_lossy())
+    }
+
+    let file_content = fs::read_to_string(&file).expect("read file error");
+
+    let mut lexer = Lexer::new(file_content, file_rc.clone());
+
+    let tokens = lexer.get_tokens();
+
+    if lexer.contains_error() {
+        lexer.print_errors();
+        println!();
+        panic!("lexer error")
+    }
+
+    let mut parser = Parser::new(tokens);
+
+    let program = match parser.parse_program() {
+        Ok(it) => it,
+        Err(err) => {
+            display_err(&err);
+            println!();
+            panic!("parser error")
+        }
+    };
+
+    let mut checker = TypeChecker::new(Rc::new(RefCell::new(TypeTable::new())));
+
+    let typed_program = match checker.check_node(program) {
+        Ok(it) => it,
+        Err(err) => {
+            println!("{err:#?}");
+            println!();
+            panic!("type checker error")
+        }
+    };
+
+    let compiler = Compiler::new(
+        create_target_isa(),
+        file_rc.clone(),
+        Rc::new(RefCell::new(SymbolTable::new())),
+    );
+
+    let code = match compiler.compile_program(typed_program) {
+        Ok(code) => code,
+        Err(err) => {
+            println!("{err}");
+            println!();
+            panic!("compiler error")
+        }
+    };
+
+    #[cfg(windows)]
+    let output_file_stem = ".exe";
+
+    #[cfg(target_os = "linux")]
+    let output_file_stem = "";
+
+    let output_path = if let Some(it) = arg.output {
+        PathBuf::from(it)
+    } else {
+        file.parent().unwrap().join(PathBuf::from(
+            file.file_stem().unwrap().to_string_lossy().to_string() + output_file_stem,
+        ))
+    };
+
+    if !output_path.exists() {
+        fs::create_dir_all(&output_path.parent().unwrap()).unwrap()
+    }
+
+    match compile_to_executable(&code, &output_path) {
+        Ok(_) => (),
+        Err(it) => println!("{it}")
+    }
+}
+
 fn main() {
     let args = Args::parse();
 
-    println!("args: {args:#?}")
+    compile(args);
 }
