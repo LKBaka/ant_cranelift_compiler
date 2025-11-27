@@ -50,6 +50,7 @@ pub struct CompilerState<'a> {
     pub module: &'a mut ObjectModule,
     pub table: Rc<RefCell<SymbolTable>>,
     pub function_map: &'a mut HashMap<String, cranelift_module::FuncId>,
+    pub data_map: &'a mut HashMap<String, cranelift_module::DataId>,
 }
 
 impl Compiler {
@@ -94,7 +95,7 @@ impl Compiler {
                     .builder
                     .def_var(Variable::from_u32(symbol.index as u32), val);
 
-                return Ok(state.builder.ins().iconst(types::I64, 0)) // unit
+                return Ok(state.builder.ins().iconst(types::I64, 0)); // unit
             }
 
             TypedStatement::Block { statements: it, .. } => {
@@ -110,20 +111,23 @@ impl Compiler {
             TypedStatement::While {
                 condition, block, ..
             } => {
-                let head = state.builder.create_block();   // while 头
-                let body = state.builder.create_block();   // 循环体
-                let exit = state.builder.create_block();   // 退出
+                let head = state.builder.create_block(); // while 头
+                let body = state.builder.create_block(); // 循环体
+                let exit = state.builder.create_block(); // 退出
 
                 state.builder.ins().jump(head, &[]);
 
                 state.builder.switch_to_block(head);
                 let condition_val = Self::compile_expr(state, condition)?;
-                state.builder.ins().brif(condition_val, body, &[], exit, &[]);
+                state
+                    .builder
+                    .ins()
+                    .brif(condition_val, body, &[], exit, &[]);
 
                 state.builder.switch_to_block(body);
                 let _body_val = Self::compile_stmt(state, &block.as_ref())?;
                 state.builder.ins().jump(head, &[]);
-                
+
                 state.builder.seal_block(body);
                 state.builder.seal_block(head);
 
@@ -158,6 +162,31 @@ impl Compiler {
                 }
             }
 
+            TypedExpression::StrLiteral { value, .. } => {
+                let content = value.to_string() + "\0";
+
+                let data_id = *state.data_map.entry(content.clone()).or_insert_with(|| {
+                    let name = format!("str_{}", content.len());
+                    let id = state
+                        .module
+                        .declare_data(&name, Linkage::Local, true, false)
+                        .unwrap();
+                    let mut desc = cranelift_module::DataDescription::new();
+                    
+                    // 使用 Init::Bytes
+                    desc.init = cranelift_module::Init::Bytes {
+                        contents: content.into_bytes().into_boxed_slice(),
+                    };
+                    state.module.define_data(id, &desc).unwrap();
+                    id
+                });
+
+                let gv = state
+                    .module
+                    .declare_data_in_func(data_id, &mut state.builder.func);
+                Ok(state.builder.ins().global_value(platform_width_to_int_type(), gv))
+            }
+
             TypedExpression::Assign { left, right, .. } => {
                 let TypedExpression::Ident(ident, _) = &**left else {
                     return Err("assign target must be ident".into());
@@ -171,8 +200,10 @@ impl Compiler {
                     .get(&ident.value)
                     .ok_or_else(|| format!("undefined variable `{}`", ident.value))?;
 
-                state.builder.def_var(Variable::from_u32(var_symbol.index as u32), new_val);
-                
+                state
+                    .builder
+                    .def_var(Variable::from_u32(var_symbol.index as u32), new_val);
+
                 Ok(state.builder.ins().iconst(types::I64, 0)) // unit
             }
 
@@ -294,6 +325,7 @@ impl Compiler {
                         module: state.module,
                         table: func_symbol_table,
                         function_map: state.function_map,
+                        data_map: state.data_map,
                     };
 
                     let result = Self::compile_stmt(&mut func_state, block_ast)?;
@@ -498,7 +530,33 @@ impl Compiler {
                 module: &mut self.module,
                 table: self.table,
                 function_map: &mut self.function_map,
+                data_map: &mut self.data_map,
             };
+
+            // 初始化 __cputs
+            {
+                // 构造 __cputs 签名:  i32 __cputs(i8*, ...)
+                let mut puts_sig = Signature::new(CallConv::WindowsFastcall);
+                puts_sig
+                    .params
+                    .push(AbiParam::new(platform_width_to_int_type())); // 第一个参数 format: i8*
+                puts_sig.returns.push(AbiParam::new(types::I32));
+
+                let printf_id = state
+                    .module
+                    .declare_function("puts", Linkage::Import, &puts_sig)
+                    .map_err(|e| format!("declare puts failed: {}", e))?;
+
+                // 放进 function_map，方便后面 call
+                state.function_map.insert("__cputs".into(), printf_id);
+
+                // 登记进符号表后，立刻 declare
+                let func_symbol = state.table.borrow_mut().define("__cputs");
+                state.builder.declare_var(
+                    Variable::from_u32(func_symbol.index as u32),
+                    platform_width_to_int_type(), // 函数指针类型
+                );
+            }
 
             for stmt in statements {
                 ret_val = Self::compile_stmt(&mut state, &stmt)?;
@@ -517,6 +575,21 @@ impl Compiler {
             }
 
             state.builder.finalize();
+        }
+
+        #[cfg(debug_assertions)]
+        {
+            match cranelift_codegen::verify_function(&self.context.func, &*self.target_isa) {
+                Ok(_) => {}
+                Err(errors) => {
+                    let mut msg = String::new();
+                    for e in errors.0.iter() {
+                        use std::fmt::Write;
+                        writeln!(msg, "verifier: {}", e).unwrap();
+                    }
+                    return Err(format!("verifier errors:\n{}", msg));
+                }
+            }
         }
 
         self.module
@@ -547,7 +620,7 @@ mod tests {
     use ant_lexer::Lexer;
     use ant_parser::Parser;
 
-    use ant_type_checker::{TypeChecker, table::TypeTable};
+    use ant_type_checker::{IntTy, Ty, TypeChecker, table::TypeTable};
 
     use crate::compiler::{Compiler, compile_to_executable, create_target_isa, table::SymbolTable};
 
@@ -571,35 +644,25 @@ mod tests {
         let tokens = (&mut Lexer::new(
             // "if 0i64 {42i64} else if 1i64 {42i64} else {0i64}".into(),
             // "1i64 + 2i64 * 3i64 - 4i64".into(),
-            // r#"
-            // func fib(n: i64) -> i64 {
-            //     if n == 0i64 {
-            //         0i64
-            //     } else if n == 1i64 {
-            //         1i64
-            //     } else {
-            //         fib(n - 1i64) + fib(n - 2i64)
-            //     }
-            // }
-            // fib(40i64)
-            // "#
-            // .into(),
-            r#"
-            let n = 0i64
-            while n < 10i64 {
-                n = n + 1i64
-            }
-
-            n
-            "#
-            .into(),
+            "__cputs(\"hello, world!\n\"); 0i64".into(),
             file.clone(),
         ))
             .get_tokens();
 
         let node = (&mut Parser::new(tokens)).parse_program().unwrap();
 
-        let typed_node = (&mut TypeChecker::new(Rc::new(RefCell::new(TypeTable::new()))))
+        let typed_node = (&mut TypeChecker::new(Rc::new(RefCell::new({
+            let mut table = TypeTable::new();
+            table.define_var(
+                "__cputs",
+                Ty::Function {
+                    params_type: vec![Ty::Str],
+                    ret_type: Box::new(Ty::IntTy(IntTy::I32)),
+                },
+            );
+
+            table
+        }))))
             .check_node(node)
             .unwrap();
 
@@ -665,13 +728,20 @@ pub fn compile_to_executable(
         output_path.file_stem().unwrap().to_str().unwrap()
     );
 
-    compiler
-        .to_command()
+    let mut command_binding = compiler.to_command();
+
+    let command = command_binding
         .arg("-o")
         .arg(output_path.to_str().unwrap()) // 输出文件名
-        .arg(output_path.parent().unwrap().join(&lib_name)) // 刚才 Cranelift 生成的 .o
-        .status()
-        .expect("link failed");
+        .arg(output_path.parent().unwrap().join(&lib_name)); // 刚才 Cranelift 生成的 .o
+
+    // Windows 显式链 msvcrt
+    #[cfg(target_os = "windows")]
+    command.arg("-lmsvcrt").status().expect("link failed");
+
+    // Linux 显式链 libc
+    #[cfg(target_os = "linux")]
+    command.arg("-lc").status().expect("link failed");
 
     // 清除 lib 文件
     fs::remove_file(lib_name)?;
