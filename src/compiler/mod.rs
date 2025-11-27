@@ -533,10 +533,16 @@ impl Compiler {
                 data_map: &mut self.data_map,
             };
 
+            #[cfg(windows)]
+            let call_conv = CallConv::WindowsFastcall;
+
+            #[cfg(target_os = "linux")]
+            let call_conv = CallConv::SystemV;
+
             // 初始化 __cputs
             {
                 // 构造 __cputs 签名:  i32 __cputs(i8*, ...)
-                let mut puts_sig = Signature::new(CallConv::WindowsFastcall);
+                let mut puts_sig = Signature::new(call_conv);
                 puts_sig
                     .params
                     .push(AbiParam::new(platform_width_to_int_type())); // 第一个参数 format: i8*
