@@ -135,11 +135,13 @@ pub fn compile_infix(
                     "-" => (|state, x, y| state.builder.ins().isub(x, y)) as OpFunc,
                     "*" => (|state, x, y| state.builder.ins().imul(x, y)) as OpFunc,
                     "/" => (|state, x, y| state.builder.ins().fdiv(x, y)) as OpFunc,
+                    ">" => (|state, x, y| state.builder.ins().icmp(IntCC::SignedGreaterThan, x, y)) as OpFunc,
+                    "<" => (|state, x, y| state.builder.ins().icmp(IntCC::SignedLessThan, x, y)) as OpFunc,
                     "==" => (|state, x, y| state.builder.ins().icmp(IntCC::Equal, x, y)) as OpFunc,
                     "!=" => {
                         (|state, x, y| state.builder.ins().icmp(IntCC::NotEqual, x, y)) as OpFunc
                     }
-                    _ => todo!(),
+                    _ => todo!("todo op {op}"),
                 };
 
                 Ok(op_func(state, lval, rval))

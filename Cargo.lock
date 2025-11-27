@@ -99,7 +99,7 @@ checksum = "c3d036a3c4ab069c7b410a2ce876bd74808d2d0888a82667669f8e783a898bf1"
 [[package]]
 name = "ast"
 version = "0.1.0"
-source = "git+https://github.com/LKBaka/TypedAnt.git#8f541922d00a86be638cde5dea02477c3bc51382"
+source = "git+https://github.com/LKBaka/TypedAnt.git#03d13d6645df0fc9ed307bee5c72efb8d0757a8c"
 dependencies = [
  "bigdecimal",
  "token",
@@ -471,7 +471,7 @@ checksum = "a6cb138bb79a146c1bd460005623e142ef0181e3d0219cb493e02f7d08a35695"
 [[package]]
 name = "lexer"
 version = "0.1.0"
-source = "git+https://github.com/LKBaka/TypedAnt.git#8f541922d00a86be638cde5dea02477c3bc51382"
+source = "git+https://github.com/LKBaka/TypedAnt.git#03d13d6645df0fc9ed307bee5c72efb8d0757a8c"
 dependencies = [
  "colored",
  "token",
@@ -586,7 +586,7 @@ checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 [[package]]
 name = "parser"
 version = "0.1.0"
-source = "git+https://github.com/LKBaka/TypedAnt.git#8f541922d00a86be638cde5dea02477c3bc51382"
+source = "git+https://github.com/LKBaka/TypedAnt.git#03d13d6645df0fc9ed307bee5c72efb8d0757a8c"
 dependencies = [
  "ast",
  "colored",
@@ -807,7 +807,7 @@ dependencies = [
 [[package]]
 name = "token"
 version = "0.1.0"
-source = "git+https://github.com/LKBaka/TypedAnt.git#8f541922d00a86be638cde5dea02477c3bc51382"
+source = "git+https://github.com/LKBaka/TypedAnt.git#03d13d6645df0fc9ed307bee5c72efb8d0757a8c"
 dependencies = [
  "phf",
 ]
@@ -845,7 +845,7 @@ dependencies = [
 [[package]]
 name = "type_checker"
 version = "0.1.0"
-source = "git+https://github.com/LKBaka/TypedAnt.git#8f541922d00a86be638cde5dea02477c3bc51382"
+source = "git+https://github.com/LKBaka/TypedAnt.git#03d13d6645df0fc9ed307bee5c72efb8d0757a8c"
 dependencies = [
  "ast",
  "bigdecimal",
@@ -874,7 +874,7 @@ checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
 [[package]]
 name = "utils"
 version = "0.1.0"
-source = "git+https://github.com/LKBaka/TypedAnt.git#8f541922d00a86be638cde5dea02477c3bc51382"
+source = "git+https://github.com/LKBaka/TypedAnt.git#03d13d6645df0fc9ed307bee5c72efb8d0757a8c"
 
 [[package]]
 name = "version_check"
@@ -981,9 +981,9 @@ checksum = "589f6da84c646204747d1270a2a5661ea66ed1cced2631d546fdfb155959f9ec"
 
 [[package]]
 name = "winnow"
-version = "0.7.13"
+version = "0.7.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "21a0236b59786fed61e2a80582dd500fe61f18b5dca67a4a067d0bc9039339cf"
+checksum = "5a5364e9d77fcdeeaa6062ced926ee3381faa2ee02d3eb83a5c27a8825540829"
 dependencies = [
  "memchr",
 ]
@@ -996,18 +996,18 @@ checksum = "f17a85883d4e6d00e8a97c586de764dabcc06133f7f1d55dce5cdc070ad7fe59"
 
 [[package]]
 name = "zerocopy"
-version = "0.8.28"
+version = "0.8.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "43fa6694ed34d6e57407afbccdeecfa268c470a7d2a5b0cf49ce9fcc345afb90"
+checksum = "4ea879c944afe8a2b25fef16bb4ba234f47c694565e97383b36f3a878219065c"
 dependencies = [
  "zerocopy-derive",
 ]
 
 [[package]]
 name = "zerocopy-derive"
-version = "0.8.28"
+version = "0.8.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c640b22cd9817fae95be82f0d2f90b11f7605f6c319d16705c459b27ac2cbc26"
+checksum = "cf955aa904d6040f70dc8e9384444cb1030aed272ba3cb09bbc4ab9e7c1f34f5"
 dependencies = [
  "proc-macro2",
  "quote",

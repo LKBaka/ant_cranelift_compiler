@@ -94,7 +94,7 @@ impl Compiler {
                     .builder
                     .def_var(Variable::from_u32(symbol.index as u32), val);
 
-                Ok(val)
+                return Ok(state.builder.ins().iconst(types::I64, 0)) // unit
             }
 
             TypedStatement::Block { statements: it, .. } => {
@@ -105,6 +105,33 @@ impl Compiler {
                 }
 
                 Ok(ret_val)
+            }
+
+            TypedStatement::While {
+                condition, block, ..
+            } => {
+                let head = state.builder.create_block();   // while 头
+                let body = state.builder.create_block();   // 循环体
+                let exit = state.builder.create_block();   // 退出
+
+                state.builder.ins().jump(head, &[]);
+
+                state.builder.switch_to_block(head);
+                let condition_val = Self::compile_expr(state, condition)?;
+                state.builder.ins().brif(condition_val, body, &[], exit, &[]);
+
+                state.builder.switch_to_block(body);
+                let _body_val = Self::compile_stmt(state, &block.as_ref())?;
+                state.builder.ins().jump(head, &[]);
+                
+                state.builder.seal_block(body);
+                state.builder.seal_block(head);
+
+                state.builder.switch_to_block(exit);
+                state.builder.seal_block(exit);
+
+                // Return a default value for the while loop expression
+                Ok(state.builder.ins().iconst(types::I64, 0))
             }
 
             _ => todo!("impl function 'compile_stmt'"),
@@ -129,6 +156,24 @@ impl Compiler {
                 } else {
                     Err(format!("undefined variable: {}", it.value))
                 }
+            }
+
+            TypedExpression::Assign { left, right, .. } => {
+                let TypedExpression::Ident(ident, _) = &**left else {
+                    return Err("assign target must be ident".into());
+                };
+
+                let new_val = Self::compile_expr(state, &right)?;
+
+                let var_symbol = state
+                    .table
+                    .borrow()
+                    .get(&ident.value)
+                    .ok_or_else(|| format!("undefined variable `{}`", ident.value))?;
+
+                state.builder.def_var(Variable::from_u32(var_symbol.index as u32), new_val);
+                
+                Ok(state.builder.ins().iconst(types::I64, 0)) // unit
             }
 
             TypedExpression::Function {
@@ -526,17 +571,26 @@ mod tests {
         let tokens = (&mut Lexer::new(
             // "if 0i64 {42i64} else if 1i64 {42i64} else {0i64}".into(),
             // "1i64 + 2i64 * 3i64 - 4i64".into(),
+            // r#"
+            // func fib(n: i64) -> i64 {
+            //     if n == 0i64 {
+            //         0i64
+            //     } else if n == 1i64 {
+            //         1i64
+            //     } else {
+            //         fib(n - 1i64) + fib(n - 2i64)
+            //     }
+            // }
+            // fib(40i64)
+            // "#
+            // .into(),
             r#"
-            func fib(n: i64) -> i64 {
-                if n == 0i64 {
-                    0i64
-                } else if n == 1i64 {
-                    1i64
-                } else {
-                    fib(n - 1i64) + fib(n - 2i64)
-                }
+            let n = 0i64
+            while n < 10i64 {
+                n = n + 1i64
             }
-            fib(40i64)
+
+            n
             "#
             .into(),
             file.clone(),
@@ -561,7 +615,7 @@ mod tests {
                 compile_to_executable(&object_code, Path::new("test_program.exe")).unwrap();
             }
             Err(e) => {
-                eprintln!("Compilation failed: {}", e);
+                panic!("Compilation failed: {}", e);
             }
         }
     }
