@@ -1,4 +1,4 @@
-use ant_type_checker::{IntTy, Ty};
+use ant_type_checker::ty::{IntTy, Ty};
 use cranelift::prelude::types;
 
 use crate::compiler::imm::platform_width_to_int_type;

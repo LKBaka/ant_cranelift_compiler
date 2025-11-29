@@ -6,7 +6,7 @@ pub mod table;
 use std::cell::RefCell;
 use std::{collections::HashMap, fs, path::Path, rc::Rc, sync::Arc};
 
-use ant_type_checker::Ty;
+use ant_type_checker::ty::Ty;
 use ant_type_checker::typed_ast::GetType;
 use cranelift::codegen::ir::InstBuilder;
 use cranelift::prelude::{AbiParam, Signature, Value, types};
@@ -172,7 +172,7 @@ impl Compiler {
                         .declare_data(&name, Linkage::Local, true, false)
                         .unwrap();
                     let mut desc = cranelift_module::DataDescription::new();
-                    
+
                     // 使用 Init::Bytes
                     desc.init = cranelift_module::Init::Bytes {
                         contents: content.into_bytes().into_boxed_slice(),
@@ -184,7 +184,10 @@ impl Compiler {
                 let gv = state
                     .module
                     .declare_data_in_func(data_id, &mut state.builder.func);
-                Ok(state.builder.ins().global_value(platform_width_to_int_type(), gv))
+                Ok(state
+                    .builder
+                    .ins()
+                    .global_value(platform_width_to_int_type(), gv))
             }
 
             TypedExpression::Assign { left, right, .. } => {
@@ -583,7 +586,6 @@ impl Compiler {
             state.builder.finalize();
         }
 
-        #[cfg(debug_assertions)]
         {
             match cranelift_codegen::verify_function(&self.context.func, &*self.target_isa) {
                 Ok(_) => {}
@@ -626,7 +628,11 @@ mod tests {
     use ant_lexer::Lexer;
     use ant_parser::Parser;
 
-    use ant_type_checker::{IntTy, Ty, TypeChecker, table::TypeTable};
+    use ant_type_checker::{
+        TypeChecker,
+        table::TypeTable,
+        ty::{IntTy, Ty},
+    };
 
     use crate::compiler::{Compiler, compile_to_executable, create_target_isa, table::SymbolTable};
 

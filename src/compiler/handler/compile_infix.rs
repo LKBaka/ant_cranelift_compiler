@@ -2,7 +2,7 @@ use std::rc::Rc;
 
 use ant_ast::expr::IntValue;
 use ant_type_checker::{
-    Ty,
+    ty::Ty,
     typed_ast::{GetType, typed_expr::TypedExpression},
 };
 use cranelift::prelude::{InstBuilder, IntCC, Value, types};

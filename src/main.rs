@@ -6,13 +6,30 @@ use ant_cranelift_compiler::compiler::{
 use ant_lexer::Lexer;
 use ant_parser::{Parser, error::display_err};
 
-use ant_type_checker::{TypeChecker, table::TypeTable};
+use ant_type_checker::{
+    TypeChecker,
+    table::TypeTable,
+    ty::{IntTy, Ty},
+};
+
 use clap::Parser as ClapParser;
 
 use crate::args::Args;
 
 mod args;
 mod compiler;
+
+fn init_type_table(mut table: TypeTable) -> TypeTable {
+    table.define_var(
+        "__cputs",
+        Ty::Function {
+            params_type: vec![Ty::Str],
+            ret_type: Box::new(Ty::IntTy(IntTy::I32)),
+        },
+    );
+
+    table
+}
 
 fn compile(arg: Args) {
     let file_rc: Rc<str> = arg.file.clone().into();
@@ -45,7 +62,7 @@ fn compile(arg: Args) {
         }
     };
 
-    let mut checker = TypeChecker::new(Rc::new(RefCell::new(TypeTable::new())));
+    let mut checker = TypeChecker::new(Rc::new(RefCell::new(init_type_table(TypeTable::new()))));
 
     let typed_program = match checker.check_node(program) {
         Ok(it) => it,
@@ -91,7 +108,7 @@ fn compile(arg: Args) {
 
     match compile_to_executable(&code, &output_path) {
         Ok(_) => (),
-        Err(it) => println!("{it}")
+        Err(it) => println!("{it}"),
     }
 }
 
