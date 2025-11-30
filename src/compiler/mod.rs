@@ -859,15 +859,11 @@ mod tests {
         // 解析ast
         let tokens = (&mut Lexer::new(
             r#"
-            struct A {
-                val: str,
+            if true != true {
+                100i64
+            } else {
+                0i64
             }
-
-            let o = A {
-                val = "test str a"
-            }
-
-            __cputs(o.val); 0i64
             "#
             .into(),
             file.clone(),

@@ -147,6 +147,20 @@ pub fn compile_infix(
                 Ok(op_func(state, lval, rval))
             }
 
+            (Ty::Bool, Ty::Bool) => {
+                type OpFunc = fn(&mut CompilerState<'_>, Value, Value) -> Value;
+
+                let op_func: OpFunc = match op {
+                    "==" => (|state, x, y| state.builder.ins().icmp(IntCC::Equal, x, y)) as OpFunc,
+                    "!=" => {
+                        (|state, x, y| state.builder.ins().icmp(IntCC::NotEqual, x, y)) as OpFunc
+                    }
+                    _ => todo!("todo op {op}"),
+                };
+
+                Ok(op_func(state, lval, rval))
+            }
+
             (lty, rty) => todo!("impl {left} {op} {right}. left_ty: {lty}, right_ty: {rty}"),
         }
     };

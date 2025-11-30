@@ -1,4 +1,4 @@
-__cputs(\"hello, world!\n\")
+__cputs("hello, world!\n")
 
 func fib(n: i64) -> i64 {
     if n == 0i64 {
