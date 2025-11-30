@@ -9,7 +9,9 @@ use std::{collections::HashMap, fs, path::Path, rc::Rc, sync::Arc};
 use ant_type_checker::ty::Ty;
 use ant_type_checker::typed_ast::GetType;
 use cranelift::codegen::ir::InstBuilder;
-use cranelift::prelude::{AbiParam, Signature, Value, types};
+use cranelift::prelude::{
+    AbiParam, MemFlags, Signature, StackSlotData, StackSlotKind, Value, types,
+};
 use cranelift_codegen::ir::FuncRef;
 use cranelift_codegen::{
     ir::{Function, UserFuncName},
@@ -26,6 +28,7 @@ use ant_type_checker::typed_ast::{
 
 use crate::compiler::handler::compile_infix::compile_infix;
 use crate::compiler::imm::platform_width_to_int_type;
+use crate::compiler::table::{StructLayout, SymbolTy};
 use crate::compiler::{
     convert_type::convert_type_to_cranelift_type, imm::int_value_to_imm, table::SymbolTable,
 };
@@ -47,6 +50,7 @@ pub struct Compiler {
 
 pub struct CompilerState<'a> {
     pub builder: FunctionBuilder<'a>,
+    pub target_isa: Arc<dyn TargetIsa>,
     pub module: &'a mut ObjectModule,
     pub table: Rc<RefCell<SymbolTable>>,
     pub function_map: &'a mut HashMap<String, cranelift_module::FuncId>,
@@ -74,6 +78,94 @@ impl Compiler {
             data_map: HashMap::new(),
             target_isa,
             table,
+        }
+    }
+
+    /// 在编译阶段计算 struct 布局（目标平台相关）
+    fn compile_struct_layout(
+        state: &mut CompilerState,
+        fields: &[(Rc<str>, Ty)],
+    ) -> Result<StructLayout, String> {
+        let pointer_width = state.target_isa.pointer_bytes() as u32;
+
+        let mut offsets = Vec::with_capacity(fields.len());
+        let mut current_offset = 0u32;
+        let mut max_align = 1u32;
+
+        for (_, ty) in fields {
+            let field_align = Self::get_type_align(state, ty, pointer_width)?;
+            let field_size = Self::get_type_size(state, ty, pointer_width)?;
+
+            // 对齐当前偏移
+            if current_offset % field_align != 0 {
+                current_offset += field_align - (current_offset % field_align);
+            }
+
+            offsets.push(current_offset);
+            current_offset += field_size;
+            max_align = max_align.max(field_align);
+        }
+
+        // 对齐总大小
+        let size = if current_offset % max_align != 0 {
+            current_offset + max_align - (current_offset % max_align)
+        } else {
+            current_offset
+        };
+
+        Ok(StructLayout {
+            fields: fields.to_vec(),
+            offsets,
+            size,
+            align: max_align,
+        })
+    }
+
+    fn get_type_size(
+        state: &mut CompilerState,
+        ty: &Ty,
+        pointer_width: u32,
+    ) -> Result<u32, String> {
+        match ty {
+            Ty::IntTy(_) => Ok(8),
+            Ty::Bool => Ok(1),
+            Ty::Str => Ok(pointer_width),
+            Ty::Struct(name, _) => {
+                let SymbolTy::Struct(layout) = state.table.borrow().get(name).map_or_else(
+                    || Err(format!("undefine struct: {name}")),
+                    |it| Ok(it.symbol_ty),
+                )?
+                else {
+                    Err(format!("not a struct: {name}"))?
+                };
+
+                Ok(layout.align)
+            }
+            _ => todo!(),
+        }
+    }
+
+    fn get_type_align(
+        state: &mut CompilerState,
+        ty: &Ty,
+        pointer_width: u32,
+    ) -> Result<u32, String> {
+        match ty {
+            Ty::IntTy(_) => Ok(8),
+            Ty::Bool => Ok(1),
+            Ty::Str => Ok(pointer_width),
+            Ty::Struct(name, _) => {
+                let SymbolTy::Struct(layout) = state.table.borrow().get(name).map_or_else(
+                    || Err(format!("undefine struct: {name}")),
+                    |it| Ok(it.symbol_ty),
+                )?
+                else {
+                    Err(format!("not a struct: {name}"))?
+                };
+
+                Ok(layout.align)
+            }
+            _ => todo!(),
         }
     }
 
@@ -134,7 +226,27 @@ impl Compiler {
                 state.builder.switch_to_block(exit);
                 state.builder.seal_block(exit);
 
-                // Return a default value for the while loop expression
+                // unit
+                Ok(state.builder.ins().iconst(types::I64, 0))
+            }
+
+            TypedStatement::Struct { ty, .. } => {
+                // 从 Type 中提取字段定义
+                let Ty::Struct(name, field_types) = ty else {
+                    return Err(format!("not a struct"));
+                };
+
+                let layout = Self::compile_struct_layout(
+                    state,
+                    &field_types
+                        .iter()
+                        .map(|(name, val_ty)| (name.clone(), val_ty.clone()))
+                        .collect::<Vec<(Rc<str>, Ty)>>(),
+                )?;
+
+                state.table.borrow_mut().define_struct(name, layout);
+
+                // unit
                 Ok(state.builder.ins().iconst(types::I64, 0))
             }
 
@@ -188,6 +300,96 @@ impl Compiler {
                     .builder
                     .ins()
                     .global_value(platform_width_to_int_type(), gv))
+            }
+
+            TypedExpression::FieldAccess(obj, field, _) => {
+                // 编译对象表达式
+                let obj_ptr = Self::compile_expr(state, &obj)?;
+
+                // 获取对象类型，确保是 struct
+                let obj_ty = obj.get_type();
+                let Ty::Struct(name, _) = &obj_ty else {
+                    return Err("field access on non-struct type".into());
+                };
+
+                // 从符号表获取结构体布局
+                let SymbolTy::Struct(layout) = state
+                    .table
+                    .borrow()
+                    .get(name)
+                    .ok_or_else(|| format!("undefined struct: {}", name))?
+                    .symbol_ty
+                else {
+                    Err(format!("not a struct type"))?
+                };
+
+                // 查找字段索引
+                let field_idx = layout
+                    .fields
+                    .iter()
+                    .position(|(n, _)| n == &field.value)
+                    .ok_or_else(|| format!("field '{}' not found in struct '{}'", field, name))?; // 类型检查已保证存在，这里只是安全断言
+
+                let offset = layout.offsets[field_idx];
+
+                // 计算字段地址
+                let field_ptr = if offset == 0 {
+                    obj_ptr
+                } else {
+                    state.builder.ins().iadd_imm(obj_ptr, offset as i64)
+                };
+
+                // 加载字段值
+                let field_ty = &layout.fields[field_idx].1;
+                let cranelift_ty = convert_type_to_cranelift_type(field_ty);
+                Ok(state
+                    .builder
+                    .ins()
+                    .load(cranelift_ty, MemFlags::new(), field_ptr, 0))
+            }
+
+            TypedExpression::BuildStruct(struct_name, fields, _) => {
+                let SymbolTy::Struct(layout) =
+                    state.table.borrow().get(&struct_name.value).map_or_else(
+                        || Err(format!("undefined struct: {struct_name}")),
+                        |it| Ok(it.symbol_ty),
+                    )?
+                else {
+                    Err(format!("not a struct: {struct_name}"))?
+                };
+
+                // 分配内存
+                let stack_slot = state.builder.create_sized_stack_slot(StackSlotData {
+                    kind: StackSlotKind::ExplicitSlot,
+                    size: layout.size,
+                    align_shift: layout.align.trailing_zeros() as u8,
+                });
+                let struct_ptr = state.builder.ins().stack_addr(platform_width_to_int_type(), stack_slot, 0);
+
+                // 构造结构体
+                for (field_name, field_expr) in fields {
+                    let field_idx = layout
+                        .fields
+                        .iter()
+                        .position(|(n, _)| n == &field_name.value)
+                        .unwrap(); // 类型检查保证存在
+
+                    let offset = layout.offsets[field_idx];
+                    let field_ptr = if offset == 0 {
+                        struct_ptr
+                    } else {
+                        state.builder.ins().iadd_imm(struct_ptr, offset as i64)
+                    };
+
+                    // 编译字段值
+                    let field_val = Self::compile_expr(state, field_expr)?;
+                    state
+                        .builder
+                        .ins()
+                        .store(MemFlags::new(), field_val, field_ptr, 0);
+                }
+
+                Ok(struct_ptr)
             }
 
             TypedExpression::Assign { left, right, .. } => {
@@ -329,6 +531,7 @@ impl Compiler {
                         table: func_symbol_table,
                         function_map: state.function_map,
                         data_map: state.data_map,
+                        target_isa: state.target_isa.clone(),
                     };
 
                     let result = Self::compile_stmt(&mut func_state, block_ast)?;
@@ -530,6 +733,7 @@ impl Compiler {
 
             let mut state = CompilerState {
                 builder,
+                target_isa: self.target_isa.clone(),
                 module: &mut self.module,
                 table: self.table,
                 function_map: &mut self.function_map,
@@ -654,9 +858,18 @@ mod tests {
 
         // 解析ast
         let tokens = (&mut Lexer::new(
-            // "if 0i64 {42i64} else if 1i64 {42i64} else {0i64}".into(),
-            // "1i64 + 2i64 * 3i64 - 4i64".into(),
-            "__cputs(\"hello, world!\n\"); 0i64".into(),
+            r#"
+            struct A {
+                val: str,
+            }
+
+            let o = A {
+                val = "test str a"
+            }
+
+            __cputs(o.val); 0i64
+            "#
+            .into(),
             file.clone(),
         ))
             .get_tokens();
@@ -745,7 +958,8 @@ pub fn compile_to_executable(
     let command = command_binding
         .arg("-o")
         .arg(output_path.to_str().unwrap()) // 输出文件名
-        .arg(output_path.parent().unwrap().join(&lib_name)); // 刚才 Cranelift 生成的 .o
+        .arg(output_path.parent().unwrap().join(&lib_name))
+        .arg("-static"); // 刚才 Cranelift 生成的 .o
 
     // Windows 显式链 msvcrt
     #[cfg(target_os = "windows")]
