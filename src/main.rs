@@ -1,37 +1,40 @@
-use std::{cell::RefCell, fs, path::PathBuf, rc::Rc};
+mod args;
+mod compiler;
 
-use ant_cranelift_compiler::compiler::{
+use std::{
+    cell::RefCell,
+    fs,
+    path::PathBuf,
+    rc::Rc,
+};
+
+use crate::compiler::{
     Compiler, compile_to_executable, create_target_isa, table::SymbolTable,
 };
+
 use ant_lexer::Lexer;
 use ant_parser::{Parser, error::display_err};
 
 use ant_type_checker::{
     TypeChecker,
     table::TypeTable,
-    ty::{IntTy, Ty},
 };
 
 use clap::Parser as ClapParser;
 
 use crate::args::Args;
 
-mod args;
-mod compiler;
+static mut ARG: Option<Args> = {
+    None
+};
 
-fn init_type_table(mut table: TypeTable) -> TypeTable {
-    table.define_var(
-        "__cputs",
-        Ty::Function {
-            params_type: vec![Ty::Str],
-            ret_type: Box::new(Ty::IntTy(IntTy::I32)),
-        },
-    );
-
-    table
+pub fn read_arg() -> *const Option<Args> {
+    &raw const ARG
 }
 
 fn compile(arg: Args) {
+    unsafe { ARG = Some(arg.clone()) };
+    
     let file_rc: Rc<str> = arg.file.clone().into();
     let file = PathBuf::from(arg.file);
 
@@ -62,7 +65,7 @@ fn compile(arg: Args) {
         }
     };
 
-    let mut checker = TypeChecker::new(Rc::new(RefCell::new(init_type_table(TypeTable::new()))));
+    let mut checker = TypeChecker::new(Rc::new(RefCell::new(TypeTable::new())));
 
     let typed_program = match checker.check_node(program) {
         Ok(it) => it,

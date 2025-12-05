@@ -33,6 +33,15 @@ use crate::compiler::{
     convert_type::convert_type_to_cranelift_type, imm::int_value_to_imm, table::SymbolTable,
 };
 
+#[cfg(windows)]
+const CALL_CONV: CallConv = CallConv::WindowsFastcall;
+
+#[cfg(target_os = "linux")]
+const CALL_CONV: CallConv = CallConv::SystemV;
+
+#[cfg(target_os = "macos")]
+const CALL_CONV: CallConv = CallConv::AppleAarch64;
+
 // 编译器结构体
 pub struct Compiler {
     module: ObjectModule,
@@ -250,7 +259,77 @@ impl Compiler {
                 Ok(state.builder.ins().iconst(types::I64, 0))
             }
 
-            _ => todo!("impl function 'compile_stmt'"),
+            TypedStatement::Extern {
+                abi,
+                extern_func_name,
+                alias,
+                ty,
+                ..
+            } => {
+                // 检查 abi (目前只支持c)
+                if abi.value.as_ref() != "C" {
+                    return Err(format!("unsupported abi: {}", abi.value));
+                }
+
+                let Ty::Function {
+                    params_type,
+                    ret_type,
+                    ..
+                } = ty
+                else {
+                    return Err(format!("not a function: {ty}"));
+                };
+
+                let mut cranelift_params = params_type
+                    .iter()
+                    .map(|it| AbiParam::new(convert_type_to_cranelift_type(it)))
+                    .collect::<Vec<_>>();
+
+                // 构造签名
+                let mut extern_func_sig = Signature::new(CALL_CONV);
+
+                extern_func_sig.params.append(&mut cranelift_params);
+
+                extern_func_sig
+                    .returns
+                    .push(AbiParam::new(convert_type_to_cranelift_type(&ret_type)));
+
+                let extern_func_id = state
+                    .module
+                    .declare_function(&extern_func_name.value, Linkage::Import, &extern_func_sig)
+                    .map_err(|e| format!("declare puts failed: {}", e))?;
+
+                // 放进 function_map，方便后面 call
+                state
+                    .function_map
+                    .insert(alias.value.to_string(), extern_func_id);
+
+                // 登记进符号表后，立刻 declare
+                let func_symbol = state.table.borrow_mut().define(&alias.value);
+                state.builder.declare_var(
+                    Variable::from_u32(func_symbol.index as u32),
+                    platform_width_to_int_type(), // 函数指针类型
+                );
+
+                let func_ref = state
+                    .module
+                    .declare_func_in_func(extern_func_id, &mut state.builder.func);
+
+                let func_addr_val = state
+                    .builder
+                    .ins()
+                    .func_addr(platform_width_to_int_type(), func_ref);
+
+                state.builder.def_var(
+                    Variable::from_u32(func_symbol.index as u32),
+                    func_addr_val,
+                );
+
+                // unit
+                Ok(state.builder.ins().iconst(platform_width_to_int_type(), 0))
+            }
+
+            stmt => todo!("impl function 'compile_stmt' {stmt}"),
         }
     }
 
@@ -364,7 +443,11 @@ impl Compiler {
                     size: layout.size,
                     align_shift: layout.align.trailing_zeros() as u8,
                 });
-                let struct_ptr = state.builder.ins().stack_addr(platform_width_to_int_type(), stack_slot, 0);
+                let struct_ptr =
+                    state
+                        .builder
+                        .ins()
+                        .stack_addr(platform_width_to_int_type(), stack_slot, 0);
 
                 // 构造结构体
                 for (field_name, field_expr) in fields {
@@ -396,6 +479,14 @@ impl Compiler {
                 let TypedExpression::Ident(ident, _) = &**left else {
                     return Err("assign target must be ident".into());
                 };
+
+                if left.get_type() != right.get_type() {
+                    return Err(format!(
+                        "expected: {}, got: {}",
+                        left.get_type(),
+                        right.get_type()
+                    ));
+                }
 
                 let new_val = Self::compile_expr(state, &right)?;
 
@@ -562,28 +653,26 @@ impl Compiler {
                 func_ty,
                 ..
             } => {
-                let (params_type, ret_ty) = match func_ty {
+                let (params_type, ret_ty, va_arg) = match func_ty {
                     Ty::Function {
                         params_type,
                         ret_type,
-                    } => (params_type, ret_type),
+                        is_variadic,
+                    } => (params_type, ret_type, is_variadic),
                     _ => unreachable!(),
                 };
 
-                let direct_func: Option<FuncRef> = if let TypedExpression::Ident(ident, _) = &**func
-                {
-                    state
-                        .function_map
-                        .get(&ident.value.to_string())
-                        .copied()
-                        .map(|fid| {
-                            state
-                                .module
-                                .declare_func_in_func(fid, &mut state.builder.func)
-                        })
+                let func_id = if let TypedExpression::Ident(ident, _) = &**func {
+                    state.function_map.get(&ident.value.to_string()).copied()
                 } else {
                     None
                 };
+
+                let direct_func: Option<FuncRef> = func_id.map(|fid| {
+                    state
+                        .module
+                        .declare_func_in_func(fid, &mut state.builder.func)
+                });
 
                 let func_val = Self::compile_expr(state, &func)?;
 
@@ -595,7 +684,9 @@ impl Compiler {
                     arg_values.push(arg_val);
                 }
 
-                if let Some(fref) = direct_func {
+                if let Some(fref) = direct_func
+                    && !*va_arg
+                {
                     // 直接 call
                     let call = state.builder.ins().call(fref, &arg_values);
                     return Ok(state
@@ -609,11 +700,20 @@ impl Compiler {
                 }
 
                 // 创建函数签名
-                let mut sig = Signature::new(CallConv::SystemV);
+                let mut sig = Signature::new(CALL_CONV);
 
-                for param_ty in params_type {
-                    sig.params
-                        .push(AbiParam::new(convert_type_to_cranelift_type(param_ty)));
+                if *va_arg {
+                    for arg in args {
+                        sig.params
+                            .push(AbiParam::new(convert_type_to_cranelift_type(
+                                &arg.get_type(),
+                            )));
+                    }
+                } else {
+                    for param_ty in params_type {
+                        sig.params
+                            .push(AbiParam::new(convert_type_to_cranelift_type(param_ty)));
+                    }
                 }
 
                 if **ret_ty != Ty::Unit {
@@ -740,37 +840,6 @@ impl Compiler {
                 data_map: &mut self.data_map,
             };
 
-            #[cfg(windows)]
-            let call_conv = CallConv::WindowsFastcall;
-
-            #[cfg(target_os = "linux")]
-            let call_conv = CallConv::SystemV;
-
-            // 初始化 __cputs
-            {
-                // 构造 __cputs 签名:  i32 __cputs(i8*, ...)
-                let mut puts_sig = Signature::new(call_conv);
-                puts_sig
-                    .params
-                    .push(AbiParam::new(platform_width_to_int_type())); // 第一个参数 format: i8*
-                puts_sig.returns.push(AbiParam::new(types::I32));
-
-                let printf_id = state
-                    .module
-                    .declare_function("puts", Linkage::Import, &puts_sig)
-                    .map_err(|e| format!("declare puts failed: {}", e))?;
-
-                // 放进 function_map，方便后面 call
-                state.function_map.insert("__cputs".into(), printf_id);
-
-                // 登记进符号表后，立刻 declare
-                let func_symbol = state.table.borrow_mut().define("__cputs");
-                state.builder.declare_var(
-                    Variable::from_u32(func_symbol.index as u32),
-                    platform_width_to_int_type(), // 函数指针类型
-                );
-            }
-
             for stmt in statements {
                 ret_val = Self::compile_stmt(&mut state, &stmt)?;
             }
@@ -832,11 +901,7 @@ mod tests {
     use ant_lexer::Lexer;
     use ant_parser::Parser;
 
-    use ant_type_checker::{
-        TypeChecker,
-        table::TypeTable,
-        ty::{IntTy, Ty},
-    };
+    use ant_type_checker::{TypeChecker, table::TypeTable};
 
     use crate::compiler::{Compiler, compile_to_executable, create_target_isa, table::SymbolTable};
 
@@ -859,11 +924,9 @@ mod tests {
         // 解析ast
         let tokens = (&mut Lexer::new(
             r#"
-            if true != true {
-                100i64
-            } else {
-                0i64
-            }
+            extern "C" func printf(format_s: str, ...) -> i32;
+
+            printf("hello world!\n") ;0i64
             "#
             .into(),
             file.clone(),
@@ -872,18 +935,7 @@ mod tests {
 
         let node = (&mut Parser::new(tokens)).parse_program().unwrap();
 
-        let typed_node = (&mut TypeChecker::new(Rc::new(RefCell::new({
-            let mut table = TypeTable::new();
-            table.define_var(
-                "__cputs",
-                Ty::Function {
-                    params_type: vec![Ty::Str],
-                    ret_type: Box::new(Ty::IntTy(IntTy::I32)),
-                },
-            );
-
-            table
-        }))))
+        let typed_node = (&mut TypeChecker::new(Rc::new(RefCell::new(TypeTable::new()))))
             .check_node(node)
             .unwrap();
 

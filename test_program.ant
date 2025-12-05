@@ -1,4 +1,4 @@
-__cputs("hello, world!\n")
+extern "C" func printf(format_s: str, ...) -> i32;
 
 func fib(n: i64) -> i64 {
     if n == 0i64 {
@@ -10,4 +10,4 @@ func fib(n: i64) -> i64 {
     }
 }
 
-fib(40i64)
+printf("result: %ld", fib(40i64)); 0i64

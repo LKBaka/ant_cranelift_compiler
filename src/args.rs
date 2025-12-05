@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use clap::Parser;
 
 #[derive(Parser, Debug, Clone)]
@@ -43,5 +45,11 @@ impl OptLevelArg {
 
     pub fn is_optimized(&self) -> bool {
         self.0 != "0"
+    }
+}
+
+impl Display for OptLevelArg {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "O{}", self.0)
     }
 }
