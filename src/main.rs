@@ -1,5 +1,6 @@
 mod args;
 mod compiler;
+mod monomorphizer;
 
 use std::{
     cell::RefCell,
@@ -8,9 +9,9 @@ use std::{
     rc::Rc,
 };
 
-use crate::compiler::{
+use crate::{compiler::{
     Compiler, compile_to_executable, create_target_isa, table::SymbolTable,
-};
+}, monomorphizer::Monomorphizer};
 
 use ant_lexer::Lexer;
 use ant_parser::{Parser, error::display_err};
@@ -65,9 +66,9 @@ fn compile(arg: Args) {
         }
     };
 
-    let mut checker = TypeChecker::new(Rc::new(RefCell::new(TypeTable::new())));
+    let mut checker = TypeChecker::new(Rc::new(RefCell::new(TypeTable::new().init())));
 
-    let typed_program = match checker.check_node(program) {
+    let mut typed_program = match checker.check_node(program) {
         Ok(it) => it,
         Err(err) => {
             println!("{err:#?}");
@@ -75,6 +76,16 @@ fn compile(arg: Args) {
             panic!("type checker error")
         }
     };
+
+    let mut monomorphizer = Monomorphizer::new();
+    match monomorphizer.monomorphize(&mut typed_program) {
+        Ok(_) => (),
+        Err(it) => {
+            println!("{it}");
+            println!();
+            panic!("monomorphizer error")
+        }
+    }
 
     let compiler = Compiler::new(
         create_target_isa(),

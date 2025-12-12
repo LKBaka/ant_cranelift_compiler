@@ -60,6 +60,7 @@ pub struct SymbolTable {
 
     pub def_count: usize,
     pub map: HashMap<Rc<str>, Symbol>,
+    pub renamed_symbols: HashMap<Rc<str>, Rc<str>>,
 }
 
 impl SymbolTable {
@@ -68,6 +69,7 @@ impl SymbolTable {
             outer: None,
             def_count: 0,
             map: HashMap::new(),
+            renamed_symbols: HashMap::new(),
         }
     }
 
@@ -76,6 +78,7 @@ impl SymbolTable {
             outer: Some(outer),
             def_count: 0,
             map: HashMap::new(),
+            renamed_symbols: HashMap::new(),
         }
     }
 }
@@ -84,6 +87,10 @@ impl SymbolTable {
     pub fn get(&self, name: &str) -> Option<Symbol> {
         if let Some(it) = self.map.get(name) {
             return Some(it.clone());
+        }
+
+        if let Some(new_name) = self.renamed_symbols.get(name) {
+            return self.map.get(new_name).map_or(None, |it| Some(it.clone()));
         }
 
         if let Some(outer) = &self.outer {

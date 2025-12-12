@@ -139,7 +139,7 @@ impl Compiler {
             Ty::IntTy(_) => Ok(8),
             Ty::Bool => Ok(1),
             Ty::Str => Ok(pointer_width),
-            Ty::Struct(name, _) => {
+            Ty::Struct { name, .. } => {
                 let SymbolTy::Struct(layout) = state.table.borrow().get(name).map_or_else(
                     || Err(format!("undefine struct: {name}")),
                     |it| Ok(it.symbol_ty),
@@ -163,7 +163,7 @@ impl Compiler {
             Ty::IntTy(_) => Ok(8),
             Ty::Bool => Ok(1),
             Ty::Str => Ok(pointer_width),
-            Ty::Struct(name, _) => {
+            Ty::Struct { name, .. } => {
                 let SymbolTy::Struct(layout) = state.table.borrow().get(name).map_or_else(
                     || Err(format!("undefine struct: {name}")),
                     |it| Ok(it.symbol_ty),
@@ -241,13 +241,13 @@ impl Compiler {
 
             TypedStatement::Struct { ty, .. } => {
                 // 从 Type 中提取字段定义
-                let Ty::Struct(name, field_types) = ty else {
+                let Ty::Struct { name, fields } = ty else {
                     return Err(format!("not a struct"));
                 };
 
                 let layout = Self::compile_struct_layout(
                     state,
-                    &field_types
+                    &fields
                         .iter()
                         .map(|(name, val_ty)| (name.clone(), val_ty.clone()))
                         .collect::<Vec<(Rc<str>, Ty)>>(),
@@ -320,10 +320,9 @@ impl Compiler {
                     .ins()
                     .func_addr(platform_width_to_int_type(), func_ref);
 
-                state.builder.def_var(
-                    Variable::from_u32(func_symbol.index as u32),
-                    func_addr_val,
-                );
+                state
+                    .builder
+                    .def_var(Variable::from_u32(func_symbol.index as u32), func_addr_val);
 
                 // unit
                 Ok(state.builder.ins().iconst(platform_width_to_int_type(), 0))
@@ -387,7 +386,7 @@ impl Compiler {
 
                 // 获取对象类型，确保是 struct
                 let obj_ty = obj.get_type();
-                let Ty::Struct(name, _) = &obj_ty else {
+                let Ty::Struct { name, .. } = &obj_ty else {
                     return Err("field access on non-struct type".into());
                 };
 
@@ -903,7 +902,10 @@ mod tests {
 
     use ant_type_checker::{TypeChecker, table::TypeTable};
 
-    use crate::compiler::{Compiler, compile_to_executable, create_target_isa, table::SymbolTable};
+    use crate::{
+        compiler::{Compiler, compile_to_executable, create_target_isa, table::SymbolTable},
+        monomorphizer::Monomorphizer,
+    };
 
     #[test]
     fn simple_program() {
@@ -924,9 +926,13 @@ mod tests {
         // 解析ast
         let tokens = (&mut Lexer::new(
             r#"
-            extern "C" func printf(format_s: str, ...) -> i32;
+            extern "C" func printf(s: str, ...) -> i64;
 
-            printf("hello world!\n") ;0i64
+            func f<T>(val: T) -> T {
+                val
+            }
+
+            printf("%s\n", f("something here"));
             "#
             .into(),
             file.clone(),
@@ -935,8 +941,13 @@ mod tests {
 
         let node = (&mut Parser::new(tokens)).parse_program().unwrap();
 
-        let typed_node = (&mut TypeChecker::new(Rc::new(RefCell::new(TypeTable::new()))))
-            .check_node(node)
+        let mut typed_node =
+            (&mut TypeChecker::new(Rc::new(RefCell::new(TypeTable::new().init()))))
+                .check_node(node)
+                .unwrap();
+
+        (&mut Monomorphizer::new())
+            .monomorphize(&mut typed_node)
             .unwrap();
 
         // 编译程序
