@@ -7,6 +7,8 @@ use ant_type_checker::typed_ast::typed_node::TypedNode;
 use ant_type_checker::typed_ast::typed_stmt::TypedStatement;
 use std::collections::HashMap;
 
+use crate::traits::NoRepeatPush;
+
 /// 泛型函数信息
 #[derive(Debug, Clone)]
 struct GenericFunctionInfo {
@@ -84,40 +86,43 @@ impl Monomorphizer {
                 name,
                 generics_params,
                 ..
-            } if !generics_params.is_empty() => {
-                if let Some(fn_name) = name {
-                    let param_names: Vec<String> = generics_params
-                        .iter()
-                        .filter_map(|p| {
-                            if let TypedExpression::Ident(ident, _) = &**p {
-                                Some(ident.value.to_string())
-                            } else {
-                                None
-                            }
-                        })
-                        .collect();
+            } => if !generics_params.is_empty() && let Some(fn_name) = name {
+                let param_names: Vec<String> = generics_params
+                    .iter()
+                    .filter_map(|p| {
+                        if let TypedExpression::Ident(ident, _) = &**p {
+                            Some(ident.value.to_string())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
 
-                    if !param_names.is_empty() {
-                        generic_functions.insert(
-                            fn_name.value.to_string(),
-                            GenericFunctionInfo {
-                                expr: Box::new(expr.clone()),
-                                param_names,
-                            },
-                        );
-                    }
+                if param_names.is_empty() {
+                    return;
                 }
+
+                generic_functions.insert(
+                    fn_name.value.to_string(),
+                    GenericFunctionInfo {
+                        expr: Box::new(expr.clone()),
+                        param_names,
+                    },
+                );
             }
+
             TypedExpression::Call { func, args, .. } => {
                 Self::collect_in_expr(func, generic_functions);
                 for arg in args {
                     Self::collect_in_expr(arg, generic_functions);
                 }
             }
+            
             TypedExpression::Infix { left, right, .. } => {
                 Self::collect_in_expr(left, generic_functions);
                 Self::collect_in_expr(right, generic_functions);
             }
+            
             TypedExpression::If {
                 condition,
                 consequence,
@@ -130,6 +135,7 @@ impl Monomorphizer {
                     Self::collect_in_expr(e, generic_functions);
                 }
             }
+            
             _ => {}
         }
     }
@@ -185,9 +191,7 @@ impl Monomorphizer {
                     if generic_functions.contains_key(func_name) {
                         let arg_types: Vec<Ty> = args.iter().map(|a| a.get_type()).collect();
                         let key = (func_name.to_string(), arg_types);
-                        if !instances.contains(&key) {
-                            instances.push(key);
-                        }
+                        instances.push_no_repeat(key);
                     }
                 }
                 Self::collect_instances_in_expr(func, generic_functions, instances);
