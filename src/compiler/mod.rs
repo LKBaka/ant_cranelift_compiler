@@ -136,7 +136,7 @@ impl Compiler {
         pointer_width: u32,
     ) -> Result<u32, String> {
         match ty {
-            Ty::IntTy(_) => Ok(8),
+            Ty::IntTy(it) => Ok(it.get_bytes_size() as u32),
             Ty::Bool => Ok(1),
             Ty::Str => Ok(pointer_width),
             Ty::Struct { name, .. } => {
@@ -160,7 +160,7 @@ impl Compiler {
         pointer_width: u32,
     ) -> Result<u32, String> {
         match ty {
-            Ty::IntTy(_) => Ok(8),
+            Ty::IntTy(it) => Ok(it.get_bytes_size() as u32),
             Ty::Bool => Ok(1),
             Ty::Str => Ok(pointer_width),
             Ty::Struct { name, .. } => {
@@ -297,7 +297,7 @@ impl Compiler {
                 let extern_func_id = state
                     .module
                     .declare_function(&extern_func_name.value, Linkage::Import, &extern_func_sig)
-                    .map_err(|e| format!("declare puts failed: {}", e))?;
+                    .map_err(|e| format!("declare {extern_func_name} failed: {}", e))?;
 
                 // 放进 function_map，方便后面 call
                 state
