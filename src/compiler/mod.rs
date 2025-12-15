@@ -4,6 +4,7 @@ mod imm;
 pub mod table;
 
 use std::cell::RefCell;
+use std::path::PathBuf;
 use std::{collections::HashMap, fs, path::Path, rc::Rc, sync::Arc};
 
 use ant_type_checker::ty::Ty;
@@ -32,6 +33,8 @@ use crate::compiler::table::{StructLayout, SymbolTy};
 use crate::compiler::{
     convert_type::convert_type_to_cranelift_type, imm::int_value_to_imm, table::SymbolTable,
 };
+
+use crate::args::ARG;
 
 #[cfg(windows)]
 const CALL_CONV: CallConv = CallConv::WindowsFastcall;
@@ -969,6 +972,10 @@ mod tests {
 }
 
 /// 将对象代码编译为可执行文件
+/// object_code: &[u8]
+/// output_path: &Path
+///
+/// output_path: 目录 + 文件名 + 后缀
 pub fn compile_to_executable(
     object_code: &[u8],
     output_path: &Path,
@@ -977,6 +984,8 @@ pub fn compile_to_executable(
 
     // 创建临时对象文件
     let temp_dir = tempfile::tempdir()?;
+
+    // 目录 + 文件名 + .o
     let object_file_path = temp_dir.path().join("output.o");
 
     // 写入对象代码到临时文件
@@ -997,9 +1006,10 @@ pub fn compile_to_executable(
         .object(&object_file_path)
         .opt_level(2)
         .target(target)
-        .out_dir(output_path.parent().unwrap_or(Path::new("")))
+        .out_dir(output_path.parent().unwrap_or(Path::new(""))) // 输出目录
         .host("CONSOLE");
 
+    // 去掉后缀 compile 时会自动添加
     builder.try_compile(output_path.file_stem().unwrap().to_str().unwrap())?;
 
     // 清除临时文件
@@ -1011,14 +1021,46 @@ pub fn compile_to_executable(
         "lib{}.a",
         output_path.file_stem().unwrap().to_str().unwrap()
     );
+    let lib_path = output_path.parent().unwrap().join(&lib_name);
 
-    let mut command_binding = compiler.to_command();
+    let mut command = compiler.to_command();
+    command.arg("-o").arg(output_path).arg(&lib_path);
 
-    let command = command_binding
-        .arg("-o")
-        .arg(output_path.to_str().unwrap()) // 输出文件名
-        .arg(output_path.parent().unwrap().join(&lib_name))
-        .arg("-static"); // 刚才 Cranelift 生成的 .o
+    // 添加需要链接的库
+    if let Some(it) = unsafe { (*&raw const ARG).clone() } {
+        for path in &it.link_with {
+            command.arg("-L").arg(
+                PathBuf::from(path)
+                    .parent()
+                    .map_or("./".to_string(), |it| it.to_string_lossy().to_string()),
+            );
+        }
+
+        for lib in it.link_with {
+            let lib_name = PathBuf::from(lib).file_stem().map_or_else(
+                || Err(String::from("lib {lib} file stem not found")),
+                |it| Ok({
+                    let s = it.to_string_lossy().to_string();
+
+                    if s.starts_with("lib") {
+                        s
+                            .chars()
+                            .enumerate()
+                            .filter(|(i, _)| *i > 2usize)
+                            .map(|it| it.1.to_string())
+                            .collect::<Vec<String>>()
+                            .join("")
+                    } else {
+                        s
+                    }
+                }),
+            )?;
+            command.arg(format!("-l{lib_name}"));
+        }
+    }
+
+    // 静态链接
+    command.arg("-static");
 
     // Windows 显式链 msvcrt
     #[cfg(target_os = "windows")]
@@ -1029,7 +1071,7 @@ pub fn compile_to_executable(
     command.arg("-lc").status().expect("link failed");
 
     // 清除 lib 文件
-    fs::remove_file(lib_name)?;
+    fs::remove_file(lib_path)?;
 
     Ok(())
 }

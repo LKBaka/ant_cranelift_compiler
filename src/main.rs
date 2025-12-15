@@ -24,15 +24,7 @@ use ant_type_checker::{
 
 use clap::Parser as ClapParser;
 
-use crate::args::Args;
-
-static mut ARG: Option<Args> = {
-    None
-};
-
-pub fn read_arg() -> *const Option<Args> {
-    &raw const ARG
-}
+use crate::args::{Args, ARG};
 
 fn compile(arg: Args) {
     unsafe { ARG = Some(arg.clone()) };

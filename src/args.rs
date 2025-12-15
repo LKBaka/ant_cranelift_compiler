@@ -21,7 +21,10 @@ pub struct Args {
 
     /// 优化级别 (0-3, s, z)
     #[arg(short = 'O', default_value = "0")]
-    pub(crate) opt_level: OptLevelArg,
+    pub opt_level: OptLevelArg, 
+
+    #[arg(short = 'l', long = "link", default_value = "")]
+    pub link_with: Vec<String>
 }
 
 #[derive(Debug, Clone)]
@@ -53,3 +56,7 @@ impl Display for OptLevelArg {
         write!(f, "O{}", self.0)
     }
 }
+
+pub(crate) static mut ARG: Option<Args> = {
+    None
+};
