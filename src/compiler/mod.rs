@@ -1,6 +1,6 @@
 mod convert_type;
-pub mod handler;
 mod imm;
+pub mod handler;
 pub mod table;
 
 use std::cell::RefCell;
@@ -1037,8 +1037,9 @@ pub fn compile_to_executable(
         }
 
         for lib in it.link_with {
-            let lib_name = PathBuf::from(lib).file_stem().map_or_else(
-                || Err(String::from("lib {lib} file stem not found")),
+            if lib.trim().is_empty() { continue }
+            let lib_name = PathBuf::from(&lib).file_stem().map_or_else(
+                || Err(format!("lib {lib} file stem not found")),
                 |it| Ok({
                     let s = it.to_string_lossy().to_string();
 
