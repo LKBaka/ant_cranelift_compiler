@@ -9,104 +9,90 @@ use cranelift::prelude::{InstBuilder, IntCC, Value, types};
 
 use crate::compiler::{Compiler, CompilerState};
 
+macro_rules! four_fundamental_operations {
+    ($op:ident) => {
+        (|state, x, y| state.builder.ins().$op(x, y)) as OpFunc
+    };
+}
+
+macro_rules! cmp {
+    ($op:expr) => {
+        (|state, x, y| state.builder.ins().icmp($op, x, y)) as OpFunc
+    };
+}
+
+macro_rules! const_eval_op {
+    ($state:expr, $ty:expr, $op:expr) => {
+        $state.builder.ins().iconst($ty, $op)
+    };
+}
+
 pub fn compile_infix_iadd(state: &mut CompilerState<'_>, left: IntValue, right: IntValue) -> Value {
     match (left, right) {
-        (IntValue::I64(l), IntValue::I64(r)) => state.builder.ins().iconst(types::I64, l + r),
-        (IntValue::I32(l), IntValue::I32(r)) => {
-            state.builder.ins().iconst(types::I32, (l + r) as i64)
-        }
-        (IntValue::I16(l), IntValue::I16(r)) => {
-            state.builder.ins().iconst(types::I16, (l + r) as i64)
-        }
-        (IntValue::I8(l), IntValue::I8(r)) => state.builder.ins().iconst(types::I8, (l + r) as i64),
-        (IntValue::U64(l), IntValue::U64(r)) => {
-            state.builder.ins().iconst(types::I64, (l + r) as i64)
-        }
-        (IntValue::U32(l), IntValue::U32(r)) => {
-            state.builder.ins().iconst(types::I32, (l + r) as i64)
-        }
-        (IntValue::U16(l), IntValue::U16(r)) => {
-            state.builder.ins().iconst(types::I16, (l + r) as i64)
-        }
-        (IntValue::U8(l), IntValue::U8(r)) => state.builder.ins().iconst(types::I8, (l + r) as i64),
+        (IntValue::I64(l), IntValue::I64(r)) => const_eval_op!(state, types::I64, l + r),
+        (IntValue::I32(l), IntValue::I32(r)) => const_eval_op!(state, types::I32, (l + r) as i64),
+        (IntValue::I16(l), IntValue::I16(r)) => const_eval_op!(state, types::I16, (l + r) as i64),
+        (IntValue::I8(l), IntValue::I8(r)) => const_eval_op!(state, types::I8, (l + r) as i64),
+        (IntValue::U64(l), IntValue::U64(r)) => const_eval_op!(state, types::I64, (l + r) as i64),
+        (IntValue::U32(l), IntValue::U32(r)) => const_eval_op!(state, types::I32, (l + r) as i64),
+        (IntValue::U16(l), IntValue::U16(r)) => const_eval_op!(state, types::I16, (l + r) as i64),
+        (IntValue::U8(l), IntValue::U8(r)) => const_eval_op!(state, types::I8, (l + r) as i64),
         _ => todo!(),
     }
 }
 
 pub fn compile_infix_isub(state: &mut CompilerState<'_>, left: IntValue, right: IntValue) -> Value {
     match (left, right) {
-        (IntValue::I64(l), IntValue::I64(r)) => state.builder.ins().iconst(types::I64, l - r),
-        (IntValue::I32(l), IntValue::I32(r)) => {
-            state.builder.ins().iconst(types::I32, (l - r) as i64)
-        }
-        (IntValue::I16(l), IntValue::I16(r)) => {
-            state.builder.ins().iconst(types::I16, (l - r) as i64)
-        }
-        (IntValue::I8(l), IntValue::I8(r)) => state.builder.ins().iconst(types::I8, (l - r) as i64),
-        (IntValue::U64(l), IntValue::U64(r)) => {
-            state.builder.ins().iconst(types::I64, (l - r) as i64)
-        }
-        (IntValue::U32(l), IntValue::U32(r)) => {
-            state.builder.ins().iconst(types::I32, (l - r) as i64)
-        }
-        (IntValue::U16(l), IntValue::U16(r)) => {
-            state.builder.ins().iconst(types::I16, (l - r) as i64)
-        }
-        (IntValue::U8(l), IntValue::U8(r)) => state.builder.ins().iconst(types::I8, (l - r) as i64),
+        (IntValue::I64(l), IntValue::I64(r)) => const_eval_op!(state, types::I64, l - r),
+        (IntValue::I32(l), IntValue::I32(r)) => const_eval_op!(state, types::I32, (l - r) as i64),
+        (IntValue::I16(l), IntValue::I16(r)) => const_eval_op!(state, types::I16, (l - r) as i64),
+        (IntValue::I8(l), IntValue::I8(r)) => const_eval_op!(state, types::I8, (l - r) as i64),
+        (IntValue::U64(l), IntValue::U64(r)) => const_eval_op!(state, types::I64, (l - r) as i64),
+        (IntValue::U32(l), IntValue::U32(r)) => const_eval_op!(state, types::I32, (l - r) as i64),
+        (IntValue::U16(l), IntValue::U16(r)) => const_eval_op!(state, types::I16, (l - r) as i64),
+        (IntValue::U8(l), IntValue::U8(r)) => const_eval_op!(state, types::I8, (l - r) as i64),
         _ => todo!(),
     }
 }
 
 pub fn compile_infix_imul(state: &mut CompilerState<'_>, left: IntValue, right: IntValue) -> Value {
     match (left, right) {
-        (IntValue::I64(l), IntValue::I64(r)) => state.builder.ins().iconst(types::I64, l * r),
-        (IntValue::I32(l), IntValue::I32(r)) => {
-            state.builder.ins().iconst(types::I32, (l * r) as i64)
-        }
-        (IntValue::I16(l), IntValue::I16(r)) => {
-            state.builder.ins().iconst(types::I16, (l * r) as i64)
-        }
-        (IntValue::I8(l), IntValue::I8(r)) => state.builder.ins().iconst(types::I8, (l * r) as i64),
-        (IntValue::U64(l), IntValue::U64(r)) => {
-            state.builder.ins().iconst(types::I64, (l * r) as i64)
-        }
-        (IntValue::U32(l), IntValue::U32(r)) => {
-            state.builder.ins().iconst(types::I32, (l * r) as i64)
-        }
-        (IntValue::U16(l), IntValue::U16(r)) => {
-            state.builder.ins().iconst(types::I16, (l * r) as i64)
-        }
-        (IntValue::U8(l), IntValue::U8(r)) => state.builder.ins().iconst(types::I8, (l * r) as i64),
+        (IntValue::I64(l), IntValue::I64(r)) => const_eval_op!(state, types::I64, l * r),
+        (IntValue::I32(l), IntValue::I32(r)) => const_eval_op!(state, types::I32, (l * r) as i64),
+        (IntValue::I16(l), IntValue::I16(r)) => const_eval_op!(state, types::I16, (l * r) as i64),
+        (IntValue::I8(l), IntValue::I8(r)) => const_eval_op!(state, types::I8, (l * r) as i64),
+        (IntValue::U64(l), IntValue::U64(r)) => const_eval_op!(state, types::I64, (l * r) as i64),
+        (IntValue::U32(l), IntValue::U32(r)) => const_eval_op!(state, types::I32, (l * r) as i64),
+        (IntValue::U16(l), IntValue::U16(r)) => const_eval_op!(state, types::I16, (l * r) as i64),
+        (IntValue::U8(l), IntValue::U8(r)) => const_eval_op!(state, types::I8, (l * r) as i64),
         _ => todo!(),
     }
 }
 
 pub fn compile_infix_ieq(state: &mut CompilerState<'_>, left: IntValue, right: IntValue) -> Value {
     match (left, right) {
-        (IntValue::I64(l), IntValue::I64(r)) => {
-            state.builder.ins().iconst(types::I8, (l == r) as i64)
-        }
-        (IntValue::I32(l), IntValue::I32(r)) => {
-            state.builder.ins().iconst(types::I8, (l == r) as i64)
-        }
-        (IntValue::I16(l), IntValue::I16(r)) => {
-            state.builder.ins().iconst(types::I8, (l == r) as i64)
-        }
-        (IntValue::I8(l), IntValue::I8(r)) => {
-            state.builder.ins().iconst(types::I8, (l == r) as i64)
-        }
-        (IntValue::U64(l), IntValue::U64(r)) => {
-            state.builder.ins().iconst(types::I8, (l == r) as i64)
-        }
-        (IntValue::U32(l), IntValue::U32(r)) => {
-            state.builder.ins().iconst(types::I8, (l == r) as i64)
-        }
-        (IntValue::U16(l), IntValue::U16(r)) => {
-            state.builder.ins().iconst(types::I8, (l == r) as i64)
-        }
-        (IntValue::U8(l), IntValue::U8(r)) => {
-            state.builder.ins().iconst(types::I8, (l == r) as i64)
-        }
+        (IntValue::I64(l), IntValue::I64(r)) => const_eval_op!(state, types::I8, (l == r) as i64),
+        (IntValue::I32(l), IntValue::I32(r)) => const_eval_op!(state, types::I8, (l == r) as i64),
+        (IntValue::I16(l), IntValue::I16(r)) => const_eval_op!(state, types::I8, (l == r) as i64),
+        (IntValue::I8(l), IntValue::I8(r)) => const_eval_op!(state, types::I8, (l == r) as i64),
+        (IntValue::U64(l), IntValue::U64(r)) => const_eval_op!(state, types::I8, (l == r) as i64),
+        (IntValue::U32(l), IntValue::U32(r)) => const_eval_op!(state, types::I8, (l == r) as i64),
+        (IntValue::U16(l), IntValue::U16(r)) => const_eval_op!(state, types::I8, (l == r) as i64),
+        (IntValue::U8(l), IntValue::U8(r)) => const_eval_op!(state, types::I8, (l == r) as i64),
+        _ => todo!(),
+    }
+}
+
+pub fn compile_infix_ineq(state: &mut CompilerState<'_>, left: IntValue, right: IntValue) -> Value {
+    match (left, right) {
+        (IntValue::I64(l), IntValue::I64(r)) => const_eval_op!(state, types::I8, (l != r) as i64),
+        (IntValue::I32(l), IntValue::I32(r)) => const_eval_op!(state, types::I8, (l != r) as i64),
+        (IntValue::I16(l), IntValue::I16(r)) => const_eval_op!(state, types::I8, (l != r) as i64),
+        (IntValue::I8(l), IntValue::I8(r)) => const_eval_op!(state, types::I8, (l != r) as i64),
+        (IntValue::U64(l), IntValue::U64(r)) => const_eval_op!(state, types::I8, (l != r) as i64),
+        (IntValue::U32(l), IntValue::U32(r)) => const_eval_op!(state, types::I8, (l != r) as i64),
+        (IntValue::U16(l), IntValue::U16(r)) => const_eval_op!(state, types::I8, (l != r) as i64),
+        (IntValue::U8(l), IntValue::U8(r)) => const_eval_op!(state, types::I8, (l != r) as i64),
         _ => todo!(),
     }
 }
@@ -131,16 +117,14 @@ pub fn compile_infix(
                 type OpFunc = fn(&mut CompilerState<'_>, Value, Value) -> Value;
 
                 let op_func: OpFunc = match op {
-                    "+" => (|state, x, y| state.builder.ins().iadd(x, y)) as OpFunc,
-                    "-" => (|state, x, y| state.builder.ins().isub(x, y)) as OpFunc,
-                    "*" => (|state, x, y| state.builder.ins().imul(x, y)) as OpFunc,
-                    "/" => (|state, x, y| state.builder.ins().fdiv(x, y)) as OpFunc,
-                    ">" => (|state, x, y| state.builder.ins().icmp(IntCC::SignedGreaterThan, x, y)) as OpFunc,
-                    "<" => (|state, x, y| state.builder.ins().icmp(IntCC::SignedLessThan, x, y)) as OpFunc,
-                    "==" => (|state, x, y| state.builder.ins().icmp(IntCC::Equal, x, y)) as OpFunc,
-                    "!=" => {
-                        (|state, x, y| state.builder.ins().icmp(IntCC::NotEqual, x, y)) as OpFunc
-                    }
+                    "+" => four_fundamental_operations!(iadd),
+                    "-" => four_fundamental_operations!(isub),
+                    "*" => four_fundamental_operations!(imul),
+                    "/" => four_fundamental_operations!(fdiv),
+                    ">" => cmp!(IntCC::SignedGreaterThan),
+                    "<" => cmp!(IntCC::SignedLessThan),
+                    "==" => cmp!(IntCC::Equal),
+                    "!=" => cmp!(IntCC::NotEqual),
                     _ => todo!("todo op {op}"),
                 };
 
@@ -151,10 +135,8 @@ pub fn compile_infix(
                 type OpFunc = fn(&mut CompilerState<'_>, Value, Value) -> Value;
 
                 let op_func: OpFunc = match op {
-                    "==" => (|state, x, y| state.builder.ins().icmp(IntCC::Equal, x, y)) as OpFunc,
-                    "!=" => {
-                        (|state, x, y| state.builder.ins().icmp(IntCC::NotEqual, x, y)) as OpFunc
-                    }
+                    "==" => cmp!(IntCC::Equal),
+                    "!=" => cmp!(IntCC::NotEqual),
                     _ => todo!("todo op {op}"),
                 };
 
@@ -186,6 +168,11 @@ pub fn compile_infix(
             TypedExpression::Int { value: rval, .. },
             "==",
         ) => Ok(compile_infix_ieq(state, *lval, *rval)),
+        (
+            TypedExpression::Int { value: lval, .. },
+            TypedExpression::Int { value: rval, .. },
+            "!=",
+        ) => Ok(compile_infix_ineq(state, *lval, *rval)),
         (_, _, op) => non_const_handler(left, right, op),
     }
 }
