@@ -1,5 +1,7 @@
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
+use crate::traits::NeedGc;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SymbolScope {
     Local,
@@ -10,7 +12,7 @@ pub enum SymbolScope {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StructLayout {
     pub fields: Vec<(Rc<str>, ant_type_checker::ty::Ty)>, // 字段名和类型
-    pub offsets: Vec<u32>,                               // 编译期计算的偏移量
+    pub offsets: Vec<u32>,                                // 编译期计算的偏移量
     pub size: u32,
     pub align: u32,
 }
@@ -21,20 +23,38 @@ pub enum SymbolTy {
     Struct(StructLayout),
 }
 
+impl NeedGc for SymbolTy {
+    fn need_gc(&self) -> bool {
+        matches!(self, Self::Struct(_))
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Symbol {
+    /// 符号名
     pub name: Rc<str>,
+    /// 符号作用域 目前看来没啥用
     pub scope: SymbolScope,
-    pub index: usize,
+    /// 表中索引
+    pub table_index: usize,
+    /// 实际被压扁展开后的变量索引 (全局唯一)
+    pub var_index: usize,
+    /// 符号类型 (非 type_checker::Ty)
     pub symbol_ty: SymbolTy,
 }
 
 impl Symbol {
-    pub fn new(name: Rc<str>, scope: SymbolScope, index: usize) -> Self {
+    pub fn new(
+        name: Rc<str>,
+        scope: SymbolScope,
+        table_index: usize,
+        var_index: usize,
+    ) -> Self {
         Self {
             name,
             scope,
-            index,
+            table_index,
+            var_index,
             symbol_ty: SymbolTy::Var,
         }
     }
@@ -42,19 +62,21 @@ impl Symbol {
     pub fn create_struct(
         name: Rc<str>,
         scope: SymbolScope,
-        index: usize,
+        table_index: usize,
+        var_index: usize,
         struct_layout: StructLayout,
     ) -> Self {
         Self {
             name,
             scope,
-            index,
+            table_index,
+            var_index,
             symbol_ty: SymbolTy::Struct(struct_layout),
         }
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SymbolTable {
     pub outer: Option<Rc<RefCell<SymbolTable>>>,
 
@@ -80,6 +102,20 @@ impl SymbolTable {
             map: HashMap::new(),
             renamed_symbols: HashMap::new(),
         }
+    }
+}
+
+fn symbol_counter(table: Rc<RefCell<SymbolTable>>) -> usize {
+    let table = table.borrow();
+    if table.outer.is_none() {
+        table.def_count
+    } else {
+        symbol_counter(
+            table
+                .outer
+                .clone()
+                .map_or_else(|| Rc::new(RefCell::new(SymbolTable::new())), |it| it),
+        ) + table.def_count
     }
 }
 
@@ -109,6 +145,7 @@ impl SymbolTable {
                 SymbolScope::Global
             },
             self.def_count,
+            symbol_counter(Rc::new(RefCell::new(self.clone()))),
         );
 
         self.def_count += 1;
@@ -127,7 +164,8 @@ impl SymbolTable {
                 SymbolScope::Global
             },
             self.def_count,
-            struct_layout
+            symbol_counter(Rc::new(RefCell::new(self.clone()))),
+            struct_layout,
         );
 
         self.def_count += 1;
@@ -141,7 +179,7 @@ impl SymbolTable {
         let symbols = self
             .map
             .values()
-            .filter(|it| it.index == def_index)
+            .filter(|it| it.table_index == def_index)
             .map(|it| it.clone())
             .collect::<Vec<Symbol>>();
 
