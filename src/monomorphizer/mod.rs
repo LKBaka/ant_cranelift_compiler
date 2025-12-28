@@ -383,7 +383,7 @@ impl Monomorphizer {
                 for p in params {
                     Self::replace_calls_in_expr(p, generic_functions);
                 }
-                Self::replace_calls_in_stmt(block, generic_functions);
+                Self::replace_calls_in_expr(block, generic_functions);
             }
             
             TypedExpression::Block(stmts, ..) => {
@@ -425,7 +425,7 @@ impl Monomorphizer {
                 for param in params {
                     Self::substitute_generics_in_expr(param, type_map);
                 }
-                Self::substitute_generics_in_stmt(block, type_map);
+                Self::substitute_generics_in_expr(block, type_map);
                 *ty = Self::substitute_generic_ty(ty, type_map);
             }
             
