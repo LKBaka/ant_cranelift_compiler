@@ -1,13 +1,25 @@
-extern "C" func printf(format_s: str, ...) -> i32;
+extern "C" func printf(s: str, ...) -> i32;
 
-func fib(n: i64) -> i64 {
-    if n == 0i64 {
-        0i64
-    } else if n == 1i64 {
-        1i64
-    } else {
-        fib(n - 1i64) + fib(n - 2i64)
-    }
+// let a = 1i64;
+
+// func f() -> i64 {
+// 	a
+// }
+
+// printf("%d\n", a); 0i64
+
+struct A {
+	val: i64
 }
 
-printf("result: %ld", fib(40i64)); 0i64
+func f() -> A {
+	let a = new A {
+		val = 0i64
+	};
+
+	a.val = 100i64;
+
+	a
+}
+
+printf("%d\n", f().val); 0i64
