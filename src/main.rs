@@ -98,7 +98,7 @@ fn compile(arg: Args) {
     #[cfg(windows)]
     let output_file_stem = ".exe";
 
-    #[cfg(target_os = "linux")]
+    #[cfg(not(windows))]
     let output_file_stem = "";
 
     let output_path = if let Some(it) = arg.output {
