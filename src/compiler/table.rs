@@ -1,4 +1,4 @@
-use std::{cell::RefCell, collections::HashMap, rc::Rc};
+use std::{cell::RefCell, collections::HashMap, rc::Rc, sync::Arc};
 
 use crate::traits::NeedGc;
 
@@ -11,7 +11,7 @@ pub enum SymbolScope {
 /// 编译期计算的完整 struct 信息
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StructLayout {
-    pub fields: Vec<(Rc<str>, ant_type_checker::ty::Ty)>, // 字段名和类型
+    pub fields: Vec<(Arc<str>, ant_type_checker::ty::Ty)>, // 字段名和类型
     pub offsets: Vec<u32>,                                // 编译期计算的偏移量
     pub size: u32,
     pub align: u32,
@@ -81,8 +81,8 @@ pub struct SymbolTable {
     pub outer: Option<Rc<RefCell<SymbolTable>>>,
 
     pub def_count: usize,
-    pub map: HashMap<Rc<str>, Symbol>,
-    pub renamed_symbols: HashMap<Rc<str>, Rc<str>>,
+    pub map: HashMap<Arc<str>, Symbol>,
+    pub renamed_symbols: HashMap<Arc<str>, Arc<str>>,
 }
 
 impl SymbolTable {

@@ -7,7 +7,7 @@ use std::{
     cell::RefCell,
     fs,
     path::PathBuf,
-    rc::Rc,
+    rc::Rc, sync::Arc,
 };
 
 use crate::{compiler::{
@@ -29,7 +29,7 @@ use crate::args::{Args, ARG};
 fn compile(arg: Args) {
     unsafe { ARG = Some(arg.clone()) };
     
-    let file_rc: Rc<str> = arg.file.clone().into();
+    let file_arc: Arc<str> = arg.file.clone().into();
     let file = PathBuf::from(arg.file);
 
     if !file.exists() {
@@ -38,7 +38,7 @@ fn compile(arg: Args) {
 
     let file_content = fs::read_to_string(&file).expect("read file error");
 
-    let mut lexer = Lexer::new(file_content, file_rc.clone());
+    let mut lexer = Lexer::new(file_content, file_arc.clone());
 
     let tokens = lexer.get_tokens();
 
@@ -82,7 +82,7 @@ fn compile(arg: Args) {
 
     let compiler = Compiler::new(
         create_target_isa(),
-        file_rc.clone(),
+        file_arc.clone(),
         Rc::new(RefCell::new(SymbolTable::new())),
     );
 

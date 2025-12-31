@@ -100,7 +100,7 @@ checksum = "c3d036a3c4ab069c7b410a2ce876bd74808d2d0888a82667669f8e783a898bf1"
 [[package]]
 name = "ast"
 version = "0.1.0"
-source = "git+https://github.com/LKBaka/TypedAnt.git#90edf1c7719c8b238a8827dab1e2ea93e58e3787"
+source = "git+https://github.com/LKBaka/TypedAnt.git#0a9d4a962d4f9617a468a14fe61b7740c194d12c"
 dependencies = [
  "bigdecimal",
  "indexmap",
@@ -115,9 +115,9 @@ checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
 
 [[package]]
 name = "bigdecimal"
-version = "0.4.9"
+version = "0.4.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "560f42649de9fa436b73517378a147ec21f6c997a546581df4b4b31677828934"
+checksum = "4d6867f1565b3aad85681f1015055b087fcfd840d6aeee6eee7f2da317603695"
 dependencies = [
  "autocfg",
  "libm",
@@ -473,7 +473,7 @@ checksum = "a6cb138bb79a146c1bd460005623e142ef0181e3d0219cb493e02f7d08a35695"
 [[package]]
 name = "lexer"
 version = "0.1.0"
-source = "git+https://github.com/LKBaka/TypedAnt.git#90edf1c7719c8b238a8827dab1e2ea93e58e3787"
+source = "git+https://github.com/LKBaka/TypedAnt.git#0a9d4a962d4f9617a468a14fe61b7740c194d12c"
 dependencies = [
  "colored",
  "token",
@@ -588,7 +588,7 @@ checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 [[package]]
 name = "parser"
 version = "0.1.0"
-source = "git+https://github.com/LKBaka/TypedAnt.git#90edf1c7719c8b238a8827dab1e2ea93e58e3787"
+source = "git+https://github.com/LKBaka/TypedAnt.git#0a9d4a962d4f9617a468a14fe61b7740c194d12c"
 dependencies = [
  "ast",
  "colored",
@@ -652,9 +652,9 @@ dependencies = [
 
 [[package]]
 name = "proc-macro2"
-version = "1.0.103"
+version = "1.0.104"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5ee95bc4ef87b8d5ba32e8b7714ccc834865276eab0aed5c9958d00ec45f49e8"
+checksum = "9695f8df41bb4f3d222c95a67532365f569318332d03d5f3f67f37b20e6ebdf0"
 dependencies = [
  "unicode-ident",
 ]
@@ -779,9 +779,9 @@ checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
 
 [[package]]
 name = "syn"
-version = "2.0.111"
+version = "2.0.112"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "390cc9a294ab71bdb1aa2e99d13be9c753cd2d7bd6560c77118597410c4d2e87"
+checksum = "21f182278bf2d2bcb3c88b1b08a37df029d71ce3d3ae26168e3c653b213b99d4"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -810,7 +810,7 @@ dependencies = [
 [[package]]
 name = "token"
 version = "0.1.0"
-source = "git+https://github.com/LKBaka/TypedAnt.git#90edf1c7719c8b238a8827dab1e2ea93e58e3787"
+source = "git+https://github.com/LKBaka/TypedAnt.git#0a9d4a962d4f9617a468a14fe61b7740c194d12c"
 dependencies = [
  "phf",
 ]
@@ -848,7 +848,7 @@ dependencies = [
 [[package]]
 name = "type_checker"
 version = "0.1.0"
-source = "git+https://github.com/LKBaka/TypedAnt.git#90edf1c7719c8b238a8827dab1e2ea93e58e3787"
+source = "git+https://github.com/LKBaka/TypedAnt.git#0a9d4a962d4f9617a468a14fe61b7740c194d12c"
 dependencies = [
  "ast",
  "bigdecimal",
@@ -878,7 +878,7 @@ checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
 [[package]]
 name = "utils"
 version = "0.1.0"
-source = "git+https://github.com/LKBaka/TypedAnt.git#90edf1c7719c8b238a8827dab1e2ea93e58e3787"
+source = "git+https://github.com/LKBaka/TypedAnt.git#0a9d4a962d4f9617a468a14fe61b7740c194d12c"
 
 [[package]]
 name = "version_check"

@@ -1,4 +1,4 @@
-use std::rc::Rc;
+use std::sync::Arc;
 
 use ant_ast::expr::IntValue;
 use ant_type_checker::{
@@ -99,7 +99,7 @@ pub fn compile_infix_ineq(state: &mut CompilerState<'_>, left: IntValue, right: 
 
 pub fn compile_infix(
     state: &mut CompilerState<'_>,
-    op: Rc<str>,
+    op: Arc<str>,
     left: &Box<TypedExpression>,
     right: &Box<TypedExpression>,
 ) -> Result<Value, String> {

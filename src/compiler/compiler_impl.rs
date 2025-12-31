@@ -31,7 +31,7 @@ use crate::{
 impl Compiler {
     pub fn new(
         target_isa: Arc<dyn TargetIsa>,
-        file: Rc<str>,
+        file: Arc<str>,
         table: Rc<RefCell<SymbolTable>>,
     ) -> Compiler {
         // 创建 ObjectModule
@@ -89,12 +89,12 @@ impl Compiler {
     /// 在编译阶段计算 struct 布局（目标平台相关）
     fn compile_struct_layout(
         state: &mut CompilerState,
-        fields: &[(Rc<str>, Ty)],
+        fields: &[(Arc<str>, Ty)],
     ) -> Result<StructLayout, String> {
         let pointer_width = state.target_isa.pointer_bytes() as u32;
 
-        let mut new_fields: Vec<(Rc<str>, Ty)> = Vec::with_capacity(fields.len() + 1);
-        new_fields.push((Rc::from("__ref_count__"), Ty::IntTy(IntTy::USize)));
+        let mut new_fields: Vec<(Arc<str>, Ty)> = Vec::with_capacity(fields.len() + 1);
+        new_fields.push((Arc::from("__ref_count__"), Ty::IntTy(IntTy::USize)));
         new_fields.extend_from_slice(&fields);
 
         let mut offsets = Vec::with_capacity(new_fields.len());
@@ -266,7 +266,7 @@ impl Compiler {
                     &fields
                         .iter()
                         .map(|(name, val_ty)| (name.clone(), val_ty.clone()))
-                        .collect::<Vec<(Rc<str>, Ty)>>(),
+                        .collect::<Vec<(Arc<str>, Ty)>>(),
                 )?;
 
                 state.table.borrow_mut().define_struct(name, layout);
@@ -354,7 +354,9 @@ impl Compiler {
 
                 // 这个值永远不会被使用
                 Ok(val)
-            } // stmt => todo!("impl function 'compile_stmt' {stmt}"),
+            } 
+            
+            stmt => todo!("impl function 'compile_stmt' {stmt}"),
         }
     }
 
@@ -1035,7 +1037,7 @@ mod tests {
 
     #[test]
     fn simple_program() {
-        let file: std::rc::Rc<str> = "__simple_program__".into();
+        let file: std::sync::Arc<str> = "__simple_program__".into();
 
         // 创建目标 ISA
         let target_isa = create_target_isa();

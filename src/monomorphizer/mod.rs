@@ -505,7 +505,7 @@ impl Monomorphizer {
 
     fn substitute_generic_ty(ty: &Ty, type_map: &HashMap<String, Ty>) -> Ty {
         match ty {
-            Ty::Generic(name) => type_map
+            Ty::Generic(name, _) => type_map
                 .get(name.as_ref())
                 .cloned()
                 .unwrap_or_else(|| ty.clone()),
