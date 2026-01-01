@@ -1023,7 +1023,7 @@ impl Compiler {
 
 #[cfg(test)]
 mod tests {
-    use std::{cell::RefCell, path::Path, rc::Rc};
+    use std::{cell::RefCell, path::Path, rc::Rc, sync::{Arc, Mutex}};
 
     use ant_lexer::Lexer;
     use ant_parser::Parser;
@@ -1070,7 +1070,7 @@ mod tests {
         let node = (&mut Parser::new(tokens)).parse_program().unwrap();
 
         let mut typed_node =
-            (&mut TypeChecker::new(Rc::new(RefCell::new(TypeTable::new().init()))))
+            (&mut TypeChecker::new(Arc::new(Mutex::new(TypeTable::new().init()))))
                 .check_node(node)
                 .unwrap();
 

@@ -7,7 +7,7 @@ use std::{
     cell::RefCell,
     fs,
     path::PathBuf,
-    rc::Rc, sync::Arc,
+    rc::Rc, sync::{Arc, Mutex},
 };
 
 use crate::{compiler::{
@@ -59,7 +59,7 @@ fn compile(arg: Args) {
         }
     };
 
-    let mut checker = TypeChecker::new(Rc::new(RefCell::new(TypeTable::new().init())));
+    let mut checker = TypeChecker::new(Arc::new(Mutex::new(TypeTable::new().init())));
 
     let mut typed_program = match checker.check_node(program) {
         Ok(it) => it,
