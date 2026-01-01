@@ -75,42 +75,39 @@ pub fn compile_to_executable(
     object_code: &[u8],
     output_path: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    use cc;
     use tempfile;
 
-    // 创建临时对象文件
+    // 临时 .o
     let temp_dir = tempfile::tempdir()?;
-
-    // 目录 + 文件名 + .o
     let object_file_path = temp_dir.path().join("output.o");
-
-    // 写入对象代码到临时文件
     fs::write(&object_file_path, object_code)?;
 
-    use cc;
-
+    // -------- target triple --------
     #[cfg(target_os = "windows")]
     let target = "x86_64-pc-windows-gnu";
 
     #[cfg(target_os = "linux")]
-    let target = "x86_64-unknown-linux-none";
+    let target = "x86_64-unknown-linux-gnu";
 
-    // 使用 cc crate 链接为 lib
-    let mut builder_binding = cc::Build::new();
+    #[cfg(target_os = "macos")]
+    let target = if cfg!(target_arch = "aarch64") {
+        "aarch64-apple-darwin"
+    } else {
+        "x86_64-apple-darwin"
+    };
 
-    let builder = builder_binding
+    // -------- 先用 cc 生成 libxxx.a --------
+    let mut build = cc::Build::new();
+    build
         .object(&object_file_path)
         .opt_level(2)
         .target(target)
-        .out_dir(output_path.parent().unwrap_or(Path::new(""))) // 输出目录
-        .host("CONSOLE");
+        .out_dir(output_path.parent().unwrap_or(Path::new("")));
 
-    // 去掉后缀 compile 时会自动添加
-    builder.try_compile(output_path.file_stem().unwrap().to_str().unwrap())?;
+    build.try_compile(output_path.file_stem().unwrap().to_str().unwrap())?;
 
-    // 清除临时文件
-    fs::remove_file(object_file_path)?;
-
-    let compiler = builder.get_compiler(); // 返回 `cc::Tool`
+    let compiler = build.get_compiler();
 
     let lib_name = format!(
         "lib{}.a",
@@ -118,32 +115,32 @@ pub fn compile_to_executable(
     );
     let lib_path = output_path.parent().unwrap().join(&lib_name);
 
+    // -------- 最终链接 --------
     let compiler_dir = if std::env::var("CARGO").is_ok() {
-        current_dir().map_or(".".to_string(), |it| it.display().to_string())
+        current_dir().map_or(".".into(), |p| p.display().to_string())
     } else {
-        current_exe().map_or(".".to_string(), |it| {
-            it.to_path_buf()
-                .parent()
-                .map_or(".".to_string(), |it| it.display().to_string())
+        current_exe().map_or(".".into(), |p| {
+            p.parent().map_or(".".into(), |it| it.display().to_string())
         })
     };
+
     let mut command = compiler.to_command();
     command
         .arg("-o")
         .arg(output_path)
         .arg(&lib_path)
         .arg("-L")
-        .arg(format!("{}/include", compiler_dir,))
+        .arg(format!("{}/include", compiler_dir))
         .arg("-l")
         .arg("arc");
 
-    // 添加需要链接的库
+    // 用户额外链接库
     if let Some(it) = unsafe { (*&raw const ARG).clone() } {
         for path in &it.link_with {
             command.arg("-L").arg(
                 PathBuf::from(path)
                     .parent()
-                    .map_or("./".to_string(), |it| it.to_string_lossy().to_string()),
+                    .map_or("./".to_string(), |p| p.to_string_lossy().to_string()),
             );
         }
 
@@ -151,43 +148,35 @@ pub fn compile_to_executable(
             if lib.trim().is_empty() {
                 continue;
             }
-            let lib_name = PathBuf::from(&lib).file_stem().map_or_else(
-                || Err(format!("lib {lib} file stem not found")),
-                |it| {
-                    Ok({
-                        let s = it.to_string_lossy().to_string();
 
-                        if s.starts_with("lib") {
-                            s.chars()
-                                .enumerate()
-                                .filter(|(i, _)| *i > 2usize)
-                                .map(|it| it.1.to_string())
-                                .collect::<Vec<String>>()
-                                .join("")
-                        } else {
-                            s
-                        }
-                    })
-                },
-            )?;
-            command.arg(format!("-l{lib_name}"));
+            let stem = PathBuf::from(&lib)
+                .file_stem()
+                .ok_or("invalid lib name")?
+                .to_string_lossy()
+                .to_string();
+
+            let name = stem.strip_prefix("lib").unwrap_or(&stem);
+            command.arg(format!("-l{name}"));
         }
     }
 
-    // 静态链接
-    command.arg("-static");
-
-    // Windows 显式链 msvcrt
-    #[cfg(target_os = "windows")]
-    command.arg("-lmsvcrt").status().expect("link failed");
-
-    // Linux 显式链 libc
+    // Linux: 静态 + libc + noexecstack
     #[cfg(target_os = "linux")]
-    command.arg("-lc").status().expect("link failed");
+    {
+        command.arg("-static").arg("-lc").arg("-Wl,-z,noexecstack");
+    }
 
-    // 清除 lib 文件
+    // Windows
+    #[cfg(target_os = "windows")]
+    {
+        command.arg("-static").arg("-lmsvcrt");
+    }
+
+    // macOS: 不要 static / 不要 -lc（clang 自动处理）
+
+    command.status().expect("link failed");
+
     fs::remove_file(lib_path)?;
-
     Ok(())
 }
 
