@@ -386,7 +386,7 @@ impl Monomorphizer {
                 Self::replace_calls_in_expr(block, generic_functions);
             }
             
-            TypedExpression::Block(stmts, ..) => {
+            TypedExpression::Block(_, stmts, ..) => {
                 for s in stmts {
                     Self::replace_calls_in_stmt(s, generic_functions);
                 }
@@ -460,7 +460,7 @@ impl Monomorphizer {
                 }
             }
 
-            TypedExpression::Block(stmts, ty) => {
+            TypedExpression::Block(_, stmts, ty) => {
                 for s in stmts {
                     Self::substitute_generics_in_stmt(s, type_map);
                 }
