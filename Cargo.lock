@@ -100,7 +100,7 @@ checksum = "c3d036a3c4ab069c7b410a2ce876bd74808d2d0888a82667669f8e783a898bf1"
 [[package]]
 name = "ast"
 version = "0.1.0"
-source = "git+https://github.com/LKBaka/TypedAnt.git#5827bdadd54f379fde66ded83b253dbd9d1303cb"
+source = "git+https://github.com/LKBaka/TypedAnt.git#4ce92a5e38a618dec0212bd2420d4a42cb4fb56b"
 dependencies = [
  "bigdecimal",
  "indexmap",
@@ -473,7 +473,7 @@ checksum = "a6cb138bb79a146c1bd460005623e142ef0181e3d0219cb493e02f7d08a35695"
 [[package]]
 name = "lexer"
 version = "0.1.0"
-source = "git+https://github.com/LKBaka/TypedAnt.git#5827bdadd54f379fde66ded83b253dbd9d1303cb"
+source = "git+https://github.com/LKBaka/TypedAnt.git#4ce92a5e38a618dec0212bd2420d4a42cb4fb56b"
 dependencies = [
  "colored",
  "token",
@@ -588,7 +588,7 @@ checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 [[package]]
 name = "parser"
 version = "0.1.0"
-source = "git+https://github.com/LKBaka/TypedAnt.git#5827bdadd54f379fde66ded83b253dbd9d1303cb"
+source = "git+https://github.com/LKBaka/TypedAnt.git#4ce92a5e38a618dec0212bd2420d4a42cb4fb56b"
 dependencies = [
  "ast",
  "colored",
@@ -810,7 +810,7 @@ dependencies = [
 [[package]]
 name = "token"
 version = "0.1.0"
-source = "git+https://github.com/LKBaka/TypedAnt.git#5827bdadd54f379fde66ded83b253dbd9d1303cb"
+source = "git+https://github.com/LKBaka/TypedAnt.git#4ce92a5e38a618dec0212bd2420d4a42cb4fb56b"
 dependencies = [
  "phf",
 ]
@@ -848,7 +848,7 @@ dependencies = [
 [[package]]
 name = "type_checker"
 version = "0.1.0"
-source = "git+https://github.com/LKBaka/TypedAnt.git#5827bdadd54f379fde66ded83b253dbd9d1303cb"
+source = "git+https://github.com/LKBaka/TypedAnt.git#4ce92a5e38a618dec0212bd2420d4a42cb4fb56b"
 dependencies = [
  "ast",
  "bigdecimal",
@@ -878,7 +878,7 @@ checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
 [[package]]
 name = "utils"
 version = "0.1.0"
-source = "git+https://github.com/LKBaka/TypedAnt.git#5827bdadd54f379fde66ded83b253dbd9d1303cb"
+source = "git+https://github.com/LKBaka/TypedAnt.git#4ce92a5e38a618dec0212bd2420d4a42cb4fb56b"
 
 [[package]]
 name = "version_check"
