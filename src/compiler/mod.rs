@@ -103,6 +103,7 @@ pub fn compile_to_executable(
         .object(&object_file_path)
         .opt_level(2)
         .target(target)
+        .host("CONSOLE")
         .out_dir(output_path.parent().unwrap_or(Path::new("")));
 
     build.try_compile(output_path.file_stem().unwrap().to_str().unwrap())?;
