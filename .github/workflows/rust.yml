@@ -19,11 +19,11 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            bin: typed_ant_lsp
+            bin: antc
           - os: windows-latest
-            bin: typed_ant_lsp.exe
+            bin: antc.exe
           - os: macos-latest
-            bin: typed_ant_lsp
+            bin: antc
 
     steps:
       - uses: actions/checkout@v4
@@ -41,5 +41,5 @@ jobs:
       - name: Upload binary
         uses: actions/upload-artifact@v4
         with:
-          name: typed_ant_lsp-${{ matrix.os }}
+          name: antc-${{ matrix.os }}
           path: target/release/${{ matrix.bin }}
