@@ -459,7 +459,7 @@ impl Compiler {
                     .load(cranelift_ty, MemFlags::new(), field_ptr, 0))
             }
 
-            TypedExpression::BuildStruct(struct_name, fields, _) => {
+            TypedExpression::BuildStruct(_, struct_name, fields, _) => {
                 let SymbolTy::Struct(layout) =
                     state.table.borrow().get(&struct_name.value).map_or_else(
                         || Err(format!("undefined struct: {struct_name}")),
@@ -912,7 +912,7 @@ impl Compiler {
             TypedExpression::Infix {
                 op, left, right, ..
             } => compile_infix(state, op.clone(), left, right),
-            TypedExpression::Block(it, _) => {
+            TypedExpression::Block(_, it, _) => {
                 state.enter_scope();
 
                 let mut ret_val = state.builder.ins().iconst(types::I64, 0);
