@@ -1,12 +1,13 @@
 pub mod arc;
 pub mod compile_state_impl;
+pub mod compiler_impl;
+pub mod handler;
+pub mod table;
+
 mod constants;
 mod convert_type;
 mod imm;
 
-pub mod compiler_impl;
-pub mod handler;
-pub mod table;
 
 use std::cell::RefCell;
 use std::env::{current_dir, current_exe};
