@@ -11,6 +11,7 @@ pub enum SymbolScope {
 /// 编译期计算的完整 struct 信息
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StructLayout {
+    pub name: Arc<str>,
     pub fields: Vec<(Arc<str>, ant_type_checker::ty::Ty)>, // 字段名和类型
     pub offsets: Vec<u32>,                                // 编译期计算的偏移量
     pub size: u32,
@@ -20,6 +21,7 @@ pub struct StructLayout {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SymbolTy {
     Var,
+    Function,
     Struct(StructLayout),
 }
 
@@ -56,6 +58,21 @@ impl Symbol {
             table_index,
             var_index,
             symbol_ty: SymbolTy::Var,
+        }
+    }
+
+    pub fn create_func(
+        name: Rc<str>,
+        scope: SymbolScope,
+        table_index: usize,
+        var_index: usize,
+    ) -> Self {
+        Self {
+            name,
+            scope,
+            table_index,
+            var_index,
+            symbol_ty: SymbolTy::Function,
         }
     }
 
@@ -138,6 +155,25 @@ impl SymbolTable {
 
     pub fn define(&mut self, name: &str) -> Symbol {
         let symbol = Symbol::new(
+            name.into(),
+            if self.outer.is_some() {
+                SymbolScope::Local
+            } else {
+                SymbolScope::Global
+            },
+            self.def_count,
+            symbol_counter(Rc::new(RefCell::new(self.clone()))),
+        );
+
+        self.def_count += 1;
+
+        self.map.insert(name.into(), symbol.clone());
+
+        symbol
+    }
+
+    pub fn define_func(&mut self, name: &str) -> Symbol {
+        let symbol = Symbol::create_func(
             name.into(),
             if self.outer.is_some() {
                 SymbolScope::Local
