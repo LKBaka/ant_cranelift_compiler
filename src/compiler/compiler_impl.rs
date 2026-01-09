@@ -9,10 +9,13 @@ use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext, Variable};
 use cranelift_module::{Linkage, Module, default_libcall_names};
 use cranelift_object::{ObjectBuilder, ObjectModule};
 
+use ant_ast::node::GetToken;
+use ant_token::{token::Token, token_type::TokenType};
 use ant_type_checker::{
     ty::{IntTy, Ty},
     typed_ast::{
-        GetType, typed_expr::TypedExpression, typed_node::TypedNode, typed_stmt::TypedStatement,
+        GetType, typed_expr::TypedExpression, typed_expressions::ident::Ident,
+        typed_node::TypedNode, typed_stmt::TypedStatement,
     },
 };
 
@@ -88,13 +91,19 @@ impl Compiler {
 
     /// 在编译阶段计算 struct 布局（目标平台相关）
     fn compile_struct_layout(
-        state: &mut CompilerState,
+        state: &CompilerState,
+        name: &Arc<str>,
         fields: &[(Arc<str>, Ty)],
     ) -> Result<StructLayout, String> {
         let pointer_width = state.target_isa.pointer_bytes() as u32;
 
         let mut new_fields: Vec<(Arc<str>, Ty)> = Vec::with_capacity(fields.len() + 1);
-        new_fields.push((Arc::from("__ref_count__"), Ty::IntTy(IntTy::USize)));
+
+        // 判断是否需要插入 __ref_count__ 字段
+        if fields.is_empty() || fields[0].0.as_ref() != "__ref_count__" {
+            new_fields.push((Arc::from("__ref_count__"), Ty::IntTy(IntTy::USize)));
+        }
+
         new_fields.extend_from_slice(&fields);
 
         let mut offsets = Vec::with_capacity(new_fields.len());
@@ -123,6 +132,7 @@ impl Compiler {
         };
 
         Ok(StructLayout {
+            name: name.clone(),
             fields: new_fields,
             offsets,
             size,
@@ -130,11 +140,7 @@ impl Compiler {
         })
     }
 
-    fn get_type_size(
-        state: &mut CompilerState,
-        ty: &Ty,
-        pointer_width: u32,
-    ) -> Result<u32, String> {
+    fn get_type_size(state: &CompilerState, ty: &Ty, pointer_width: u32) -> Result<u32, String> {
         match ty {
             Ty::IntTy(it) => Ok(it.get_bytes_size() as u32),
             Ty::Bool => Ok(1),
@@ -154,11 +160,7 @@ impl Compiler {
         }
     }
 
-    fn get_type_align(
-        state: &mut CompilerState,
-        ty: &Ty,
-        pointer_width: u32,
-    ) -> Result<u32, String> {
+    fn get_type_align(state: &CompilerState, ty: &Ty, pointer_width: u32) -> Result<u32, String> {
         match ty {
             Ty::IntTy(it) => Ok(it.get_bytes_size() as u32),
             Ty::Bool => Ok(1),
@@ -193,7 +195,8 @@ impl Compiler {
                 let cranelift_ty = convert_type_to_cranelift_type(ty);
                 state
                     .builder
-                    .declare_var(Variable::from_u32(symbol.var_index as u32), cranelift_ty);
+                    .try_declare_var(Variable::from_u32(symbol.var_index as u32), cranelift_ty)
+                    .map_err(|it| format!("failed to declare variable '{}': {it}", symbol.name))?;
                 state
                     .builder
                     .def_var(Variable::from_u32(symbol.var_index as u32), val);
@@ -257,12 +260,13 @@ impl Compiler {
 
             TypedStatement::Struct { ty, .. } => {
                 // 从 Type 中提取字段定义
-                let Ty::Struct { name, fields } = ty else {
+                let Ty::Struct { name, fields, .. } = ty else {
                     return Err(format!("not a struct"));
                 };
 
                 let layout = Self::compile_struct_layout(
                     state,
+                    name,
                     &fields
                         .iter()
                         .map(|(name, val_ty)| (name.clone(), val_ty.clone()))
@@ -354,8 +358,67 @@ impl Compiler {
 
                 // 这个值永远不会被使用
                 Ok(val)
-            } 
-            
+            }
+
+            TypedStatement::Impl {
+                impl_, for_, block, ..
+            } => {
+                if state.table.borrow().get(&impl_.value).is_none() {
+                    return Err(format!("cannot find type '{impl_}' in this scope"));
+                }
+
+                if let Some(for_) = for_
+                    && state.table.borrow().get(&for_.value).is_none()
+                {
+                    return Err(format!("cannot find type '{for_}' in this scope"));
+                }
+
+                let type_name = impl_.value.clone();
+
+                let TypedStatement::Block { statements, .. } = &**block else {
+                    unreachable!();
+                };
+
+                for stmt in statements {
+                    let TypedStatement::ExpressionStatement(expr) = stmt else {
+                        continue;
+                    };
+
+                    let TypedExpression::Function {
+                        name: Some(fn_name),
+                        token,
+                        params,
+                        generics_params,
+                        block,
+                        ret_ty,
+                        ty,
+                    } = expr.clone()
+                    else {
+                        continue;
+                    };
+
+                    // mangling
+                    let mut new_name_token = fn_name.clone();
+                    new_name_token.value = format!("{}__{}", type_name, &fn_name.value).into();
+
+                    Self::compile_expr(
+                        state,
+                        &TypedExpression::Function {
+                            token,
+                            name: Some(new_name_token),
+                            params,
+                            generics_params,
+                            block,
+                            ret_ty,
+                            ty,
+                        },
+                    )?;
+                }
+
+                // unit
+                Ok(state.builder.ins().iconst(platform_width_to_int_type(), 0))
+            }
+
             stmt => todo!("impl function 'compile_stmt' {stmt}"),
         }
     }
@@ -375,11 +438,15 @@ impl Compiler {
                 .ins()
                 .iconst(convert_type_to_cranelift_type(ty), *value as i64)),
 
-            TypedExpression::Ident(it, _) => {
+            TypedExpression::Ident(it, ty) => {
                 if let Some(var) = state.table.borrow().get(&it.value) {
-                    Ok(state
+                    let v = Variable::from_u32(var.var_index as u32);
+
+                    let _ = state
                         .builder
-                        .use_var(Variable::from_u32(var.var_index as u32)))
+                        .try_declare_var(v, convert_type_to_cranelift_type(&ty));
+
+                    Ok(state.builder.use_var(v))
                 } else {
                     Err(format!("undefined variable: {}", it.value))
                 }
@@ -657,7 +724,7 @@ impl Compiler {
                         .func_addr(platform_width_to_int_type(), func_ref);
 
                     // 4. 定义外部作用域的符号
-                    let func_symbol = state.table.borrow_mut().define(&name);
+                    let func_symbol = state.table.borrow_mut().define_func(&name);
                     state.builder.declare_var(
                         Variable::from_u32(func_symbol.var_index as u32),
                         platform_width_to_int_type(),
@@ -681,8 +748,8 @@ impl Compiler {
                     let func_symbol_table =
                         Rc::new(RefCell::new(SymbolTable::from_outer(state.table.clone())));
 
-                    // 7. 在函数内部符号表中也定义这个函数 - 修正这里！
-                    let inner_func_symbol = func_symbol_table.borrow_mut().define(&name);
+                    // 7. 在函数内部符号表中也定义这个函数
+                    let inner_func_symbol = func_symbol_table.borrow_mut().define_func(&name);
                     func_builder.declare_var(
                         Variable::from_u32(inner_func_symbol.var_index as u32),
                         platform_width_to_int_type(),
@@ -767,6 +834,49 @@ impl Compiler {
                     } => (params_type, ret_type, is_variadic),
                     _ => unreachable!(),
                 };
+
+                if let TypedExpression::FieldAccess(obj, field, _) = &**func
+                    && let Ty::Struct { name, fields, .. } = &obj.get_type()
+                    && let Some(Ty::Function {
+                        params_type,
+                        ret_type,
+                        ..
+                    }) = fields.get(&field.value)
+                {
+                    // 函数名重命名
+                    let func_name = format!("{}__{}", name, field.value);
+
+                    let call_expr = TypedExpression::Call {
+                        token: Token::new(
+                            "(".into(),
+                            TokenType::LParen,
+                            func.token().value,
+                            func.token().line,
+                            func.token().column,
+                        ), // 充填伪造 Token
+                        func: Box::new(TypedExpression::Ident(
+                            Ident {
+                                value: func_name.clone().into(),
+                                token: Token::new(
+                                    func_name.clone().into(),
+                                    TokenType::Ident,
+                                    func.token().value,
+                                    func.token().line,
+                                    func.token().column,
+                                ),
+                            },
+                            func_ty.clone(),
+                        )),
+                        args: args.clone(),
+                        func_ty: Ty::Function {
+                            params_type: params_type.clone(),
+                            ret_type: ret_type.clone(),
+                            is_variadic: false,
+                        },
+                    };
+
+                    return Self::compile_expr(state, &call_expr);
+                }
 
                 let func_id = if let TypedExpression::Ident(ident, _) = &**func {
                     state.function_map.get(&ident.value.to_string()).copied()
@@ -987,7 +1097,7 @@ impl Compiler {
             #[cfg(debug_assertions)]
             {
                 let func_ref = &state.builder.func;
-                eprintln!("=== before finalize:\n{}", {
+                println!("=== before finalize:\n{}", {
                     let mut s = String::new();
                     cranelift::codegen::write_function(&mut s, func_ref).unwrap();
                     s
@@ -997,17 +1107,15 @@ impl Compiler {
             state.builder.finalize();
         }
 
-        {
-            match cranelift_codegen::verify_function(&self.context.func, &*self.target_isa) {
-                Ok(_) => {}
-                Err(errors) => {
-                    let mut msg = String::new();
-                    for e in errors.0.iter() {
-                        use std::fmt::Write;
-                        writeln!(msg, "verifier: {}", e).unwrap();
-                    }
-                    return Err(format!("verifier errors:\n{}", msg));
+        match cranelift_codegen::verify_function(&self.context.func, &*self.target_isa) {
+            Ok(_) => {}
+            Err(errors) => {
+                let mut msg = String::new();
+                for e in errors.0.iter() {
+                    use std::fmt::Write;
+                    writeln!(msg, "verifier: {}", e).unwrap();
                 }
+                return Err(format!("verifier errors:\n{}", msg));
             }
         }
 
@@ -1023,7 +1131,12 @@ impl Compiler {
 
 #[cfg(test)]
 mod tests {
-    use std::{cell::RefCell, path::Path, rc::Rc, sync::{Arc, Mutex}};
+    use std::{
+        cell::RefCell,
+        path::Path,
+        rc::Rc,
+        sync::{Arc, Mutex},
+    };
 
     use ant_lexer::Lexer;
     use ant_parser::Parser;
@@ -1056,11 +1169,19 @@ mod tests {
             r#"
             extern "C" func printf(s: str, ...) -> i64;
 
-            func f<T>(val: T) -> T {
-                val
+            struct A {}
+
+            impl A {
+                func f() -> i64 {
+                    917813i64
+                }
             }
 
-            printf("%s\n", f("something here"));
+            let o = new A {};
+
+            printf("%lld\n", o.f())
+
+            printf("end\n");
             "#
             .into(),
             file.clone(),
@@ -1069,10 +1190,9 @@ mod tests {
 
         let node = (&mut Parser::new(tokens)).parse_program().unwrap();
 
-        let mut typed_node =
-            (&mut TypeChecker::new(Arc::new(Mutex::new(TypeTable::new().init()))))
-                .check_node(node)
-                .unwrap();
+        let mut typed_node = (&mut TypeChecker::new(Arc::new(Mutex::new(TypeTable::new().init()))))
+            .check_node(node)
+            .unwrap();
 
         (&mut Monomorphizer::new())
             .monomorphize(&mut typed_node)
