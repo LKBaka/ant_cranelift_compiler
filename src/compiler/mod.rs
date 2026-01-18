@@ -12,8 +12,10 @@ mod imm;
 use std::cell::RefCell;
 use std::env::{current_dir, current_exe};
 use std::path::PathBuf;
+use std::sync::Mutex;
 use std::{collections::HashMap, fs, path::Path, rc::Rc, sync::Arc};
 
+use ant_type_checker::table::TypeTable;
 use cranelift_codegen::{
     isa::TargetIsa,
     settings::{self, Configurable},
@@ -24,7 +26,7 @@ use cranelift_object::ObjectModule;
 
 use crate::compiler::table::SymbolTable;
 
-use crate::args::ARG;
+use crate::args::read_arg;
 
 // 编译器结构体
 pub struct Compiler {
@@ -39,23 +41,55 @@ pub struct Compiler {
     target_isa: Arc<dyn TargetIsa>,
 
     table: Rc<RefCell<SymbolTable>>,
+    type_table: Arc<Mutex<TypeTable>>,
 
     arc_alloc: FuncId,
     arc_retain: FuncId,
     arc_release: FuncId,
 }
 
-pub struct CompilerState<'a> {
-    pub builder: FunctionBuilder<'a>,
+pub struct GlobalState<'a> {
     pub target_isa: Arc<dyn TargetIsa>,
     pub module: &'a mut ObjectModule,
-    pub table: Rc<RefCell<SymbolTable>>,
     pub function_map: &'a mut HashMap<String, cranelift_module::FuncId>,
     pub data_map: &'a mut HashMap<String, cranelift_module::DataId>,
+    
+    pub table: Rc<RefCell<SymbolTable>>,
+    pub type_table: Arc<Mutex<TypeTable>>,
 
     pub arc_alloc: FuncId,
     pub arc_retain: FuncId,
     pub arc_release: FuncId,
+}
+
+pub struct FunctionState<'a> {
+    pub builder: FunctionBuilder<'a>,
+    pub target_isa: Arc<dyn TargetIsa>,
+    pub module: &'a mut ObjectModule,
+    pub function_map: &'a mut HashMap<String, cranelift_module::FuncId>,
+    pub data_map: &'a mut HashMap<String, cranelift_module::DataId>,
+    
+    pub table: Rc<RefCell<SymbolTable>>,
+    pub type_table: Arc<Mutex<TypeTable>>,
+
+    pub arc_alloc: FuncId,
+    pub arc_retain: FuncId,
+    pub arc_release: FuncId,
+}
+
+#[allow(unused)]
+pub trait CompileState {
+    fn get_target_isa(&self) -> Arc<dyn TargetIsa>;
+    fn get_module(&mut self) -> &mut ObjectModule;
+    fn get_function_map(&mut self) -> &mut HashMap<String, cranelift_module::FuncId>;
+    fn get_data_map(&mut self) -> &mut HashMap<String, cranelift_module::DataId>;
+    
+    fn get_table(&self) -> Rc<RefCell<SymbolTable>>;
+    fn get_type_table(&self) -> Arc<Mutex<TypeTable>>;
+
+    fn get_arc_alloc(&self) -> FuncId;
+    fn get_arc_retain(&self) -> FuncId;
+    fn get_arc_release(&self) -> FuncId;
 }
 
 // 创建目标 ISA 的辅助函数
@@ -137,7 +171,7 @@ pub fn compile_to_executable(
         .arg("arc");
 
     // 用户额外链接库
-    if let Some(it) = unsafe { (*&raw const ARG).clone() } {
+    if let Some(it) = read_arg() {
         for path in &it.link_with {
             command.arg("-L").arg(
                 PathBuf::from(path)
@@ -191,4 +225,80 @@ pub fn get_platform_width() -> usize {
 
     #[cfg(target_pointer_width = "16")]
     return 16;
+}
+
+impl CompileState for GlobalState<'_> {
+    fn get_target_isa(&self) -> Arc<dyn TargetIsa> {
+        self.target_isa.clone()
+    }
+
+    fn get_module(&mut self) -> &mut ObjectModule {
+        self.module
+    }
+
+    fn get_function_map(&mut self) -> &mut HashMap<String, cranelift_module::FuncId> {
+        self.function_map
+    }
+
+    fn get_data_map(&mut self) -> &mut HashMap<String, cranelift_module::DataId> {
+        self.data_map
+    }
+
+    fn get_table(&self) -> Rc<RefCell<SymbolTable>> {
+        self.table.clone()
+    }
+
+    fn get_type_table(&self) -> Arc<Mutex<TypeTable>> {
+        self.type_table.clone()
+    }
+
+    fn get_arc_alloc(&self) -> FuncId {
+        self.arc_alloc
+    }
+
+    fn get_arc_retain(&self) -> FuncId {
+        self.arc_retain
+    }
+
+    fn get_arc_release(&self) -> FuncId {
+        self.arc_release
+    }
+}
+
+impl CompileState for FunctionState<'_> {
+    fn get_target_isa(&self) -> Arc<dyn TargetIsa> {
+        self.target_isa.clone()
+    }
+
+    fn get_module(&mut self) -> &mut ObjectModule {
+        self.module
+    }
+
+    fn get_function_map(&mut self) -> &mut HashMap<String, cranelift_module::FuncId> {
+        self.function_map
+    }
+
+    fn get_data_map(&mut self) -> &mut HashMap<String, cranelift_module::DataId> {
+        self.data_map
+    }
+
+    fn get_table(&self) -> Rc<RefCell<SymbolTable>> {
+        self.table.clone()
+    }
+
+    fn get_type_table(&self) -> Arc<Mutex<TypeTable>> {
+        self.type_table.clone()
+    }
+
+    fn get_arc_alloc(&self) -> FuncId {
+        self.arc_alloc
+    }
+
+    fn get_arc_retain(&self) -> FuncId {
+        self.arc_retain
+    }
+
+    fn get_arc_release(&self) -> FuncId {
+        self.arc_release
+    }
 }
