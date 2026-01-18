@@ -1,8 +1,9 @@
 use std::{cell::RefCell, rc::Rc};
 
-use crate::compiler::{CompilerState, table::SymbolTable};
+use crate::compiler::{FunctionState, table::SymbolTable};
 
-impl<'a> CompilerState<'a> {
+#[allow(unused)]
+impl<'a> FunctionState<'a> {
     pub fn enter_scope(&mut self) {
         let outer = self.table.clone();
 
