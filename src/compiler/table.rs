@@ -6,6 +6,7 @@ use crate::traits::NeedGc;
 pub enum SymbolScope {
     Local,
     Global,
+    Free
 }
 
 /// 编译期计算的完整 struct 信息
@@ -43,6 +44,8 @@ pub struct Symbol {
     pub var_index: usize,
     /// 符号类型 (非 type_checker::Ty)
     pub symbol_ty: SymbolTy,
+    /// 是否为变量/函数等有值符号
+    pub is_val: bool
 }
 
 impl Symbol {
@@ -51,12 +54,14 @@ impl Symbol {
         scope: SymbolScope,
         table_index: usize,
         var_index: usize,
+        is_val: bool,
     ) -> Self {
         Self {
             name,
             scope,
             table_index,
             var_index,
+            is_val,
             symbol_ty: SymbolTy::Var,
         }
     }
@@ -66,12 +71,14 @@ impl Symbol {
         scope: SymbolScope,
         table_index: usize,
         var_index: usize,
+        is_val: bool,
     ) -> Self {
         Self {
             name,
             scope,
             table_index,
             var_index,
+            is_val,
             symbol_ty: SymbolTy::Function,
         }
     }
@@ -81,6 +88,7 @@ impl Symbol {
         scope: SymbolScope,
         table_index: usize,
         var_index: usize,
+        is_val: bool,
         struct_layout: StructLayout,
     ) -> Self {
         Self {
@@ -88,6 +96,7 @@ impl Symbol {
             scope,
             table_index,
             var_index,
+            is_val,
             symbol_ty: SymbolTy::Struct(struct_layout),
         }
     }
@@ -98,7 +107,9 @@ pub struct SymbolTable {
     pub outer: Option<Rc<RefCell<SymbolTable>>>,
 
     pub def_count: usize,
+
     pub map: HashMap<Arc<str>, Symbol>,
+    pub free_symbols: Vec<Symbol>,
     pub renamed_symbols: HashMap<Arc<str>, Arc<str>>,
 }
 
@@ -108,6 +119,7 @@ impl SymbolTable {
             outer: None,
             def_count: 0,
             map: HashMap::new(),
+            free_symbols: Vec::new(),
             renamed_symbols: HashMap::new(),
         }
     }
@@ -117,6 +129,7 @@ impl SymbolTable {
             outer: Some(outer),
             def_count: 0,
             map: HashMap::new(),
+            free_symbols: Vec::new(),
             renamed_symbols: HashMap::new(),
         }
     }
@@ -137,7 +150,7 @@ fn symbol_counter(table: Rc<RefCell<SymbolTable>>) -> usize {
 }
 
 impl SymbolTable {
-    pub fn get(&self, name: &str) -> Option<Symbol> {
+    pub fn get(&mut self, name: &str) -> Option<Symbol> {
         if let Some(it) = self.map.get(name) {
             return Some(it.clone());
         }
@@ -147,7 +160,14 @@ impl SymbolTable {
         }
 
         if let Some(outer) = &self.outer {
-            return outer.borrow().get(name);
+            let result = outer.borrow_mut().get(name)?;
+
+            if result.scope == SymbolScope::Global {
+                return Some(result);
+            }
+
+            let free = self.define_free(result);
+            return Some(free);
         }
 
         None
@@ -163,11 +183,24 @@ impl SymbolTable {
             },
             self.def_count,
             symbol_counter(Rc::new(RefCell::new(self.clone()))),
+            true,
         );
 
         self.def_count += 1;
 
         self.map.insert(name.into(), symbol.clone());
+
+        symbol
+    }
+
+    pub fn define_free(&mut self, original: Symbol) -> Symbol {
+        self.free_symbols.push(original.clone());
+
+        let mut symbol = original;
+        symbol.table_index = self.free_symbols.len() - 1;
+        symbol.scope = SymbolScope::Free;
+
+        self.map.insert(symbol.name.to_string().into(), symbol.clone());
 
         symbol
     }
@@ -182,6 +215,7 @@ impl SymbolTable {
             },
             self.def_count,
             symbol_counter(Rc::new(RefCell::new(self.clone()))),
+            true,
         );
 
         self.def_count += 1;
@@ -201,6 +235,28 @@ impl SymbolTable {
             },
             self.def_count,
             symbol_counter(Rc::new(RefCell::new(self.clone()))),
+            true,
+            struct_layout,
+        );
+
+        self.def_count += 1;
+
+        self.map.insert(name.into(), symbol.clone());
+
+        symbol
+    }
+
+    pub fn define_struct_type(&mut self, name: &str, struct_layout: StructLayout) -> Symbol {
+        let symbol = Symbol::create_struct(
+            name.into(),
+            if self.outer.is_some() {
+                SymbolScope::Local
+            } else {
+                SymbolScope::Global
+            },
+            self.def_count,
+            symbol_counter(Rc::new(RefCell::new(self.clone()))),
+            false,
             struct_layout,
         );
 
