@@ -35,7 +35,7 @@ use crate::{
         imm::{int_value_to_imm, platform_width_to_int_type},
         table::{StructLayout, SymbolScope, SymbolTable, SymbolTy},
     },
-    traits::NeedGc,
+    traits::{LiteralExprToConst, NeedGc, ToLeBytes},
 };
 
 impl Compiler {
@@ -203,7 +203,8 @@ impl Compiler {
     pub fn is_top_level_stmt(stmt: &TypedStatement) -> bool {
         matches!(
             stmt,
-            TypedStatement::ExpressionStatement(TypedExpression::Function { .. })
+            TypedStatement::ExpressionStatement(TypedExpression::Function { .. }) |
+            TypedStatement::Const { .. }
         )
     }
 
@@ -212,6 +213,32 @@ impl Compiler {
         stmt: &TypedStatement,
     ) -> Result<(), String> {
         match stmt {
+            TypedStatement::Const {
+                name, value, ..
+            } => {
+                let const_val = value.to_const().map_or_else(
+                    || Err(format!("expression `{value}` is not a constant")),
+                    |it| Ok(it),
+                )?;
+
+                let data_id = state
+                    .module
+                    .declare_data(&name.value, Linkage::Local, false, false) // Declare as Local
+                    .unwrap();
+
+                let mut data_desc = cranelift_module::DataDescription::new();
+                data_desc.init = cranelift_module::Init::Bytes {
+                    contents: const_val.to_le_bytes().into_boxed_slice(),
+                };
+
+                state.data_map.insert(name.value.to_string(), data_id);
+                
+                state.module.define_data(data_id, &data_desc).unwrap();
+
+                state.table.borrow_mut().define(&name.value);
+
+                Ok(())
+            }
             TypedStatement::ExpressionStatement(TypedExpression::Function {
                 name,
                 params,
@@ -632,7 +659,7 @@ impl Compiler {
                         .builder
                         .ins()
                         .global_value(platform_width_to_int_type(), global_var);
-                    
+
                     return Ok(state.builder.ins().load(
                         convert_type_to_cranelift_type(ty),
                         MemFlags::new(),
