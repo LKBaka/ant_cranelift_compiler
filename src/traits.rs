@@ -63,3 +63,12 @@ impl<'a> BuilderExtends for FunctionBuilder<'a> {
         }
     }
 }
+
+pub trait LiteralExprToConst {
+    type ConstType;
+    fn to_const(&self) -> Self::ConstType;
+}
+
+pub trait ToLeBytes {
+    fn to_le_bytes(&self) -> Vec<u8>;
+}

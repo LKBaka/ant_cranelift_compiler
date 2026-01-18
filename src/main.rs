@@ -2,6 +2,7 @@ mod args;
 mod compiler;
 mod monomorphizer;
 mod traits;
+mod value;
 
 use std::{
     cell::RefCell,
