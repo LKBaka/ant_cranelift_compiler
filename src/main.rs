@@ -59,7 +59,9 @@ fn compile(arg: Args) {
         }
     };
 
-    let mut checker = TypeChecker::new(Arc::new(Mutex::new(TypeTable::new().init())));
+    let type_table = Arc::new(Mutex::new(TypeTable::new().init()));
+
+    let mut checker = TypeChecker::new(type_table.clone());
 
     let mut typed_program = match checker.check_node(program) {
         Ok(it) => it,
@@ -84,6 +86,7 @@ fn compile(arg: Args) {
         create_target_isa(),
         file_arc.clone(),
         Rc::new(RefCell::new(SymbolTable::new())),
+        type_table.clone(),
     );
 
     let code = match compiler.compile_program(typed_program) {
