@@ -15,7 +15,7 @@ pub struct Args {
     #[arg(short, long)]
     pub file: String,
 
-    // 输出路径
+    /// 输出路径
     #[arg(short, long)]
     pub output: Option<String>,
 
@@ -23,8 +23,13 @@ pub struct Args {
     #[arg(short = 'O', default_value = "0")]
     pub opt_level: OptLevelArg, 
 
-    #[arg(short = 'l', long = "link", default_value = "")]
-    pub link_with: Vec<String>
+    /// 欲链接的静态库文件
+    #[arg(short = 'l', long = "link")]
+    pub link_with: Vec<String>,
+
+    /// 脚本模式开关
+    #[arg(long)]
+    pub script_mode: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -57,6 +62,10 @@ impl Display for OptLevelArg {
     }
 }
 
-pub(crate) static mut ARG: Option<Args> = {
+pub static mut ARG: Option<Args> = {
     None
 };
+
+pub fn read_arg() -> Option<Args> {
+    unsafe { (*&raw const ARG).clone() }
+}
