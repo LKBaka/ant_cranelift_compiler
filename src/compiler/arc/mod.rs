@@ -3,9 +3,9 @@ use ant_type_checker::ty::Ty;
 use cranelift::prelude::{InstBuilder, Value};
 use cranelift_module::Module;
 
-use crate::{compiler::CompilerState, traits::NeedGc};
+use crate::{compiler::FunctionState, traits::NeedGc};
 
-impl<'a> CompilerState<'a> {
+impl<'a> FunctionState<'a> {
     #[inline]
     pub fn emit_retain(&mut self, val: Value) {
         let fref = self
