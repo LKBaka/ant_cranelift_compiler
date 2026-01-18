@@ -1,0 +1,13 @@
+func fib(n: i64) -> i64 {
+    if n < 2i64 {
+        n
+    } else {
+        fib(n - 1i64) + fib(n - 2i64)
+    }
+}
+
+func main() -> i32 {
+    extern "C" func printf(s: str, ...) -> i32;
+
+    printf("%d\n", fib(40i64))
+}
