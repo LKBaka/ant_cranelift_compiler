@@ -4,3 +4,17 @@
 .vscode
 .idea
 .zed
+.DS_Store
+Thumbs.db
+desktop.ini
+*.exe
+*.o
+*.obj
+*.a
+*.lib
+*.dll
+*.so
+*.dylib
+*.pdb
+*.ilk
+*.exp
