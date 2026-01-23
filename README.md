@@ -69,6 +69,7 @@
 
 ```bash
 gcc -c ./include/arc.c
+mv ./arc.o ./include/arc.o
 ar rcs ./include/libarc.a ./inclde/arc.o
 ```
 
