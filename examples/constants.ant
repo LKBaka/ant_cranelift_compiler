@@ -1,9 +1,11 @@
 const i = 917813i32;
 const s = "ciallo";
+const _bool_val = true;
 
 func main() -> i32 {
     extern "C" func printf(s: str, ...) -> i32;
 
     printf("i = %d\n", i);
     printf("s = %s\n", s);
+    printf("_bool_val = %d\n", _bool_val);
 }
