@@ -2,7 +2,7 @@ use std::{
     cell::RefCell,
     collections::HashMap,
     rc::Rc,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, atomic::{AtomicUsize, Ordering}},
 };
 
 use cranelift::prelude::{AbiParam, InstBuilder, MemFlags, Signature, Value, types};
@@ -37,6 +37,8 @@ use crate::{
     },
     traits::{LiteralExprToConst, NeedGc, ToLeBytes},
 };
+
+pub static STR_COUNTER: AtomicUsize = AtomicUsize::new(1);
 
 impl Compiler {
     pub fn new(
@@ -660,6 +662,10 @@ impl Compiler {
                         .ins()
                         .global_value(platform_width_to_int_type(), global_var);
 
+                    if *ty == Ty::Str {
+                        return Ok(val_ptr)
+                    }
+
                     return Ok(state.builder.ins().load(
                         convert_type_to_cranelift_type(ty),
                         MemFlags::new(),
@@ -673,9 +679,13 @@ impl Compiler {
 
             TypedExpression::StrLiteral { value, .. } => {
                 let content = value.to_string() + "\0";
+                
+                // 获取当前是第几个字符串 (从一开始计数)
+                let str_count = STR_COUNTER.load(Ordering::Relaxed);
+                STR_COUNTER.fetch_add(1, Ordering::Relaxed);
 
                 let data_id = *state.data_map.entry(content.clone()).or_insert_with(|| {
-                    let name = format!("str_{}", content.len());
+                    let name = format!("str_{}_{str_count}", content.len());
                     let id = state
                         .module
                         .declare_data(&name, Linkage::Local, true, false)
