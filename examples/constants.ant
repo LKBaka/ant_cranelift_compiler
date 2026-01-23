@@ -1,0 +1,9 @@
+const i = 917813i32;
+const s = "ciallo";
+
+func main() -> i32 {
+    extern "C" func printf(s: str, ...) -> i32;
+
+    printf("i = %d\n", i);
+    printf("s = %s\n", s);
+}
