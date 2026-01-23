@@ -62,6 +62,16 @@
    cargo run -- -f test_program.ant
    ```
 
+## 如果你是 linux 用户
+
+在快速开始第三步之前 你应当重新编译一遍 libarc.a
+(在项目根目录下)
+
+```bash
+gcc -c ./include/arc.c
+ar rcs ./include/libarc.a ./inclde/arc.o
+```
+
 ## 贡献指南
 
 欢迎对本项目提出建议或贡献代码！请遵循以下步骤：
