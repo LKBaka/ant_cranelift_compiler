@@ -8,7 +8,6 @@ mod constants;
 mod convert_type;
 mod imm;
 
-
 use std::cell::RefCell;
 use std::env::{current_dir, current_exe};
 use std::path::PathBuf;
@@ -53,7 +52,7 @@ pub struct GlobalState<'a> {
     pub module: &'a mut ObjectModule,
     pub function_map: &'a mut HashMap<String, cranelift_module::FuncId>,
     pub data_map: &'a mut HashMap<String, cranelift_module::DataId>,
-    
+
     pub table: Rc<RefCell<SymbolTable>>,
     pub type_table: Arc<Mutex<TypeTable>>,
 
@@ -68,7 +67,7 @@ pub struct FunctionState<'a> {
     pub module: &'a mut ObjectModule,
     pub function_map: &'a mut HashMap<String, cranelift_module::FuncId>,
     pub data_map: &'a mut HashMap<String, cranelift_module::DataId>,
-    
+
     pub table: Rc<RefCell<SymbolTable>>,
     pub type_table: Arc<Mutex<TypeTable>>,
 
@@ -83,7 +82,7 @@ pub trait CompileState {
     fn get_module(&mut self) -> &mut ObjectModule;
     fn get_function_map(&mut self) -> &mut HashMap<String, cranelift_module::FuncId>;
     fn get_data_map(&mut self) -> &mut HashMap<String, cranelift_module::DataId>;
-    
+
     fn get_table(&self) -> Rc<RefCell<SymbolTable>>;
     fn get_type_table(&self) -> Arc<Mutex<TypeTable>>;
 
@@ -94,8 +93,8 @@ pub trait CompileState {
 
 // 创建目标 ISA 的辅助函数
 pub fn create_target_isa() -> Arc<dyn TargetIsa> {
-    let mut flag_builder = settings::builder();
-    flag_builder.set("opt_level", "speed").unwrap();
+    let flag_builder = settings::builder();
+    // flag_builder.set("opt_level", "speed").unwrap();
 
     let isa_builder = cranelift_native::builder().unwrap();
     isa_builder
@@ -136,11 +135,18 @@ pub fn compile_to_executable(
     let mut build = cc::Build::new();
     build
         .object(&object_file_path)
-        .opt_level(2)
         .target(target)
         .host("CONSOLE")
         .out_dir(output_path.parent().unwrap_or(Path::new("")));
 
+    if let Some(args) = read_arg() {
+        let opt = &args.opt_level;
+
+        if opt.is_optimized() {
+            build.opt_level_str(&opt.0);
+        }
+    }
+    
     build.try_compile(output_path.file_stem().unwrap().to_str().unwrap())?;
 
     let compiler = build.get_compiler();
