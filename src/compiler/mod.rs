@@ -142,9 +142,9 @@ pub fn compile_to_executable(
     if let Some(args) = read_arg() {
         let opt = &args.opt_level;
 
-        if opt.is_optimized() {
-            build.opt_level_str(&opt.0);
-        }
+        build.opt_level_str(&opt.0);
+    } else {
+        build.opt_level(0);
     }
     
     build.try_compile(output_path.file_stem().unwrap().to_str().unwrap())?;
