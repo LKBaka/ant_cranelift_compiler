@@ -45,7 +45,7 @@ fn compile(arg: Args) {
 
     if lexer.contains_error() {
         lexer.print_errors();
-        println!();
+        eprintln!();
         panic!("lexer error")
     }
 
@@ -55,7 +55,7 @@ fn compile(arg: Args) {
         Ok(it) => it,
         Err(err) => {
             display_err(&err);
-            println!();
+            eprintln!();
             panic!("parser error")
         }
     };
@@ -67,8 +67,8 @@ fn compile(arg: Args) {
     let mut typed_program = match checker.check_node(program) {
         Ok(it) => it,
         Err(err) => {
-            println!("{err:#?}");
-            println!();
+            eprintln!("{err:#?}");
+            eprintln!();
             panic!("type checker error")
         }
     };
@@ -77,8 +77,8 @@ fn compile(arg: Args) {
     match monomorphizer.monomorphize(&mut typed_program) {
         Ok(_) => (),
         Err(it) => {
-            println!("{it}");
-            println!();
+            eprintln!("{it}");
+            eprintln!();
             panic!("monomorphizer error")
         }
     }
@@ -93,8 +93,8 @@ fn compile(arg: Args) {
     let code = match compiler.compile_program(typed_program) {
         Ok(code) => code,
         Err(err) => {
-            println!("{err}");
-            println!();
+            eprintln!("{err}");
+            eprintln!();
             panic!("compiler error")
         }
     };
