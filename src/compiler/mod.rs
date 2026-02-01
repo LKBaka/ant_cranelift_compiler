@@ -137,6 +137,7 @@ pub fn compile_to_executable(
         .object(&object_file_path)
         .target(target)
         .host("CONSOLE")
+        .cargo_metadata(false)
         .out_dir(output_path.parent().unwrap_or(Path::new("")));
 
     if let Some(args) = read_arg() {
