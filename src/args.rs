@@ -33,7 +33,7 @@ pub struct Args {
 }
 
 #[derive(Debug, Clone)]
-pub struct OptLevelArg(String);
+pub struct OptLevelArg(pub String);
 
 impl std::str::FromStr for OptLevelArg {
     type Err = String;
