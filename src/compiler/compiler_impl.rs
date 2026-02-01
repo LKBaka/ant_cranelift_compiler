@@ -379,7 +379,6 @@ impl Compiler {
             TypedStatement::Struct { ty, name, .. } => {
                 let name = &name.value;
 
-                // 天坑! 千万不要从 Ty::Struct 读取 name, 一遇到泛型就炸了!
                 // 从 Type 中提取字段定义
                 let Ty::Struct { fields, .. } = ty else {
                     return Err(format!("not a struct"));
