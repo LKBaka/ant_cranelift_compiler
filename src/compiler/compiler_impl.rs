@@ -2,10 +2,13 @@ use std::{
     cell::RefCell,
     collections::HashMap,
     rc::Rc,
-    sync::{Arc, Mutex, atomic::{AtomicUsize, Ordering}},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicUsize, Ordering},
+    },
 };
 
-use cranelift::prelude::{AbiParam, InstBuilder, MemFlags, Signature, Value, types};
+use cranelift::prelude::{AbiParam, InstBuilder, IntCC, MemFlags, Signature, Value, types};
 use cranelift_codegen::{
     ir::{FuncRef, Function, UserFuncName},
     isa::TargetIsa,
@@ -198,15 +201,16 @@ impl Compiler {
 
                 Ok(layout.align)
             }
-            _ => todo!(),
+            _ => todo!("impl ty: {ty}"),
         }
     }
 
     pub fn is_top_level_stmt(stmt: &TypedStatement) -> bool {
         matches!(
             stmt,
-            TypedStatement::ExpressionStatement(TypedExpression::Function { .. }) |
-            TypedStatement::Const { .. }
+            TypedStatement::ExpressionStatement(TypedExpression::Function { .. })
+                | TypedStatement::Const { .. }
+                | TypedStatement::Struct { .. }
         )
     }
 
@@ -215,9 +219,7 @@ impl Compiler {
         stmt: &TypedStatement,
     ) -> Result<(), String> {
         match stmt {
-            TypedStatement::Const {
-                name, value, ..
-            } => {
+            TypedStatement::Const { name, value, .. } => {
                 let const_val = value.to_const().map_or_else(
                     || Err(format!("expression `{value}` is not a constant")),
                     |it| Ok(it),
@@ -234,7 +236,7 @@ impl Compiler {
                 };
 
                 state.data_map.insert(name.value.to_string(), data_id);
-                
+
                 state.module.define_data(data_id, &data_desc).unwrap();
 
                 state.table.borrow_mut().define(&name.value);
@@ -372,6 +374,29 @@ impl Compiler {
                 }
 
                 todo!()
+            }
+
+            TypedStatement::Struct { ty, name, .. } => {
+                let name = &name.value;
+
+                // 天坑! 千万不要从 Ty::Struct 读取 name, 一遇到泛型就炸了!
+                // 从 Type 中提取字段定义
+                let Ty::Struct { fields, .. } = ty else {
+                    return Err(format!("not a struct"));
+                };
+
+                let layout = Self::compile_struct_layout(
+                    state,
+                    name,
+                    &fields
+                        .iter()
+                        .map(|(name, val_ty)| (name.clone(), val_ty.clone()))
+                        .collect::<Vec<(Arc<str>, Ty)>>(),
+                )?;
+
+                state.table.borrow_mut().define_struct_type(name, layout);
+
+                Ok(())
             }
 
             stmt => todo!("impl function 'compile_stmt' {stmt}"),
@@ -663,7 +688,7 @@ impl Compiler {
                         .global_value(platform_width_to_int_type(), global_var);
 
                     if *ty == Ty::Str {
-                        return Ok(val_ptr)
+                        return Ok(val_ptr);
                     }
 
                     return Ok(state.builder.ins().load(
@@ -679,7 +704,7 @@ impl Compiler {
 
             TypedExpression::StrLiteral { value, .. } => {
                 let content = value.to_string() + "\0";
-                
+
                 // 获取当前是第几个字符串 (从一开始计数)
                 let str_count = STR_COUNTER.load(Ordering::Relaxed);
                 STR_COUNTER.fetch_add(1, Ordering::Relaxed);
@@ -1281,6 +1306,77 @@ impl Compiler {
                 }
 
                 Ok(ret_val)
+            }
+
+            TypedExpression::BoolAnd { left, right, .. } => {
+                let true_block = state.builder.create_block();
+                let false_block = state.builder.create_block();
+                let merge_block = state.builder.create_block();
+
+                state.builder.append_block_param(merge_block, types::I8);
+
+                let lval = Self::compile_expr(state, left)?;
+                let zero = state.builder.ins().iconst(types::I8, 0);
+
+                let cond = state.builder.ins().icmp(IntCC::NotEqual, lval, zero);
+
+                // if left != 0 -> true_block else false_block
+                state
+                    .builder
+                    .ins()
+                    .brif(cond, true_block, &[], false_block, &[]);
+
+                // true: 继续算 right
+                state.builder.switch_to_block(true_block);
+                let rval = Self::compile_expr(state, right)?;
+                state.builder.ins().jump(merge_block, &[rval]);
+                state.builder.seal_block(true_block);
+
+                // false: 直接 0
+                state.builder.switch_to_block(false_block);
+                state.builder.ins().jump(merge_block, &[zero]);
+                state.builder.seal_block(false_block);
+
+                state.builder.switch_to_block(merge_block);
+                state.builder.seal_block(merge_block);
+
+                Ok(state.builder.block_params(merge_block)[0])
+            }
+
+            TypedExpression::BoolOr { left, right, .. } => {
+                let true_block = state.builder.create_block();
+                let false_block = state.builder.create_block();
+                let merge_block = state.builder.create_block();
+
+                state.builder.append_block_param(merge_block, types::I8);
+
+                let lval = Self::compile_expr(state, left)?;
+                let zero = state.builder.ins().iconst(types::I8, 0);
+
+                let cond = state.builder.ins().icmp(IntCC::NotEqual, lval, zero);
+
+                // if left != 0 -> true_block else false_block
+                state
+                    .builder
+                    .ins()
+                    .brif(cond, true_block, &[], false_block, &[]);
+
+                // true: 直接 1
+                state.builder.switch_to_block(true_block);
+                let one = state.builder.ins().iconst(types::I8, 1);
+                state.builder.ins().jump(merge_block, &[one]);
+                state.builder.seal_block(true_block);
+
+                // false: 才算 right
+                state.builder.switch_to_block(false_block);
+                let rval = Self::compile_expr(state, right)?;
+                state.builder.ins().jump(merge_block, &[rval]);
+                state.builder.seal_block(false_block);
+
+                state.builder.switch_to_block(merge_block);
+                state.builder.seal_block(merge_block);
+
+                Ok(state.builder.block_params(merge_block)[0])
             }
 
             _ => todo!("impl function 'compile_expr'"),
