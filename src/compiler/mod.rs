@@ -11,13 +11,12 @@ mod imm;
 use std::cell::RefCell;
 use std::env::{current_dir, current_exe};
 use std::path::PathBuf;
-use std::sync::Mutex;
 use std::{collections::HashMap, fs, path::Path, rc::Rc, sync::Arc};
 
-use ant_type_checker::table::TypeTable;
+use ant_type_checker::ty_context::TypeContext;
 use cranelift_codegen::{
     isa::TargetIsa,
-    settings::{self, Configurable},
+    settings,
 };
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
 use cranelift_module::FuncId;
@@ -40,7 +39,7 @@ pub struct Compiler {
     target_isa: Arc<dyn TargetIsa>,
 
     table: Rc<RefCell<SymbolTable>>,
-    type_table: Arc<Mutex<TypeTable>>,
+    tcx: TypeContext,
 
     arc_alloc: FuncId,
     arc_retain: FuncId,
@@ -54,7 +53,8 @@ pub struct GlobalState<'a> {
     pub data_map: &'a mut HashMap<String, cranelift_module::DataId>,
 
     pub table: Rc<RefCell<SymbolTable>>,
-    pub type_table: Arc<Mutex<TypeTable>>,
+
+    pub tcx: &'a mut TypeContext,
 
     pub arc_alloc: FuncId,
     pub arc_retain: FuncId,
@@ -68,8 +68,9 @@ pub struct FunctionState<'a> {
     pub function_map: &'a mut HashMap<String, cranelift_module::FuncId>,
     pub data_map: &'a mut HashMap<String, cranelift_module::DataId>,
 
+    pub tcx: &'a mut TypeContext,
+
     pub table: Rc<RefCell<SymbolTable>>,
-    pub type_table: Arc<Mutex<TypeTable>>,
 
     pub arc_alloc: FuncId,
     pub arc_retain: FuncId,
@@ -82,9 +83,9 @@ pub trait CompileState {
     fn get_module(&mut self) -> &mut ObjectModule;
     fn get_function_map(&mut self) -> &mut HashMap<String, cranelift_module::FuncId>;
     fn get_data_map(&mut self) -> &mut HashMap<String, cranelift_module::DataId>;
+    fn get_type_context(&mut self) -> &'_ mut TypeContext;
 
     fn get_table(&self) -> Rc<RefCell<SymbolTable>>;
-    fn get_type_table(&self) -> Arc<Mutex<TypeTable>>;
 
     fn get_arc_alloc(&self) -> FuncId;
     fn get_arc_retain(&self) -> FuncId;
@@ -255,8 +256,8 @@ impl CompileState for GlobalState<'_> {
         self.table.clone()
     }
 
-    fn get_type_table(&self) -> Arc<Mutex<TypeTable>> {
-        self.type_table.clone()
+    fn get_type_context(&mut self) -> &'_ mut TypeContext {
+        self.tcx
     }
 
     fn get_arc_alloc(&self) -> FuncId {
@@ -293,8 +294,8 @@ impl CompileState for FunctionState<'_> {
         self.table.clone()
     }
 
-    fn get_type_table(&self) -> Arc<Mutex<TypeTable>> {
-        self.type_table.clone()
+    fn get_type_context(&mut self) -> &'_ mut TypeContext {
+        self.tcx
     }
 
     fn get_arc_alloc(&self) -> FuncId {

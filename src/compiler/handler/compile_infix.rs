@@ -112,7 +112,7 @@ pub fn compile_infix(
         let lval = Compiler::compile_expr(state, &left)?;
         let rval = Compiler::compile_expr(state, &right)?;
 
-        match (left.get_type(), right.get_type()) {
+        match (state.tcx.get(left.get_type()), state.tcx.get(right.get_type())) {
             (Ty::IntTy(_), Ty::IntTy(_)) => {
                 type OpFunc = fn(&mut FunctionState<'_>, Value, Value) -> Value;
 

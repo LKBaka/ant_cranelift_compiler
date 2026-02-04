@@ -3,7 +3,7 @@ use std::{
     collections::HashMap,
     rc::Rc,
     sync::{
-        Arc, Mutex,
+        Arc,
         atomic::{AtomicUsize, Ordering},
     },
 };
@@ -20,8 +20,8 @@ use cranelift_object::{ObjectBuilder, ObjectModule};
 use ant_ast::node::GetToken;
 use ant_token::{token::Token, token_type::TokenType};
 use ant_type_checker::{
-    table::TypeTable,
     ty::{IntTy, Ty},
+    ty_context::TypeContext,
     typed_ast::{
         GetType, typed_expr::TypedExpression, typed_expressions::ident::Ident,
         typed_node::TypedNode, typed_stmt::TypedStatement,
@@ -48,7 +48,7 @@ impl Compiler {
         target_isa: Arc<dyn TargetIsa>,
         file: Arc<str>,
         table: Rc<RefCell<SymbolTable>>,
-        type_table: Arc<Mutex<TypeTable>>,
+        tcx: TypeContext,
     ) -> Compiler {
         // 创建 ObjectModule
         let builder =
@@ -96,7 +96,7 @@ impl Compiler {
             target_isa,
 
             table,
-            type_table,
+            tcx,
 
             arc_alloc,
             arc_release,
@@ -164,6 +164,7 @@ impl Compiler {
             Ty::IntTy(it) => Ok(it.get_bytes_size() as u32),
             Ty::Bool => Ok(1),
             Ty::Str => Ok(pointer_width),
+            Ty::Function { .. } => Ok(pointer_width),
             Ty::Struct { name, .. } => {
                 let SymbolTy::Struct(layout) =
                     state.get_table().borrow_mut().get(name).map_or_else(
@@ -189,6 +190,7 @@ impl Compiler {
             Ty::IntTy(it) => Ok(it.get_bytes_size() as u32),
             Ty::Bool => Ok(1),
             Ty::Str => Ok(pointer_width),
+            Ty::Function { .. } => Ok(pointer_width),
             Ty::Struct { name, .. } => {
                 let SymbolTy::Struct(layout) =
                     state.get_table().borrow_mut().get(name).map_or_else(
@@ -253,7 +255,7 @@ impl Compiler {
 
                 for param in params {
                     converted_params.push(AbiParam::new(convert_type_to_cranelift_type(
-                        &param.get_type(),
+                        state.tcx.get(param.get_type()),
                     )));
                 }
 
@@ -261,12 +263,12 @@ impl Compiler {
                 ctx.func.signature = Signature::new(CALL_CONV);
                 ctx.func.signature.params.append(&mut converted_params);
 
-                if block_ast.get_type() != Ty::Unit {
+                if state.tcx.get(block_ast.get_type()) != &Ty::Unit {
                     ctx.func
                         .signature
                         .returns
                         .push(AbiParam::new(convert_type_to_cranelift_type(
-                            &block_ast.get_type(),
+                            state.tcx.get(block_ast.get_type()),
                         )));
                 }
 
@@ -326,7 +328,7 @@ impl Compiler {
                     for (i, param) in params.iter().enumerate() {
                         if let TypedExpression::TypeHint(param_name, _, ty) = &**param {
                             let symbol = func_symbol_table.borrow_mut().define(&param_name.value);
-                            let cranelift_ty = convert_type_to_cranelift_type(ty);
+                            let cranelift_ty = convert_type_to_cranelift_type(state.tcx.get(*ty));
 
                             func_builder.declare_var(
                                 Variable::from_u32(symbol.var_index as u32),
@@ -339,12 +341,14 @@ impl Compiler {
                         }
                     }
 
+                    let block_val_ty = state.tcx.get(block_ast.get_type()).clone();
+
                     // 9. 编译函数体
                     let mut func_state = FunctionState {
                         builder: func_builder,
                         module: state.module,
                         table: func_symbol_table,
-                        type_table: state.type_table.clone(),
+                        tcx: state.tcx,
                         function_map: state.function_map,
                         data_map: state.data_map,
                         target_isa: state.target_isa.clone(),
@@ -356,7 +360,7 @@ impl Compiler {
 
                     let result = Self::compile_expr(&mut func_state, block_ast)?;
 
-                    if block_ast.get_type() != Ty::Unit {
+                    if block_val_ty != Ty::Unit {
                         func_state.builder.ins().return_(&[result]);
                     } else {
                         func_state.builder.ins().return_(&[]);
@@ -380,7 +384,7 @@ impl Compiler {
                 let name = &name.value;
 
                 // 从 Type 中提取字段定义
-                let Ty::Struct { fields, .. } = ty else {
+                let Ty::Struct { fields, .. } = state.tcx.get(*ty) else {
                     return Err(format!("not a struct"));
                 };
 
@@ -389,7 +393,7 @@ impl Compiler {
                     name,
                     &fields
                         .iter()
-                        .map(|(name, val_ty)| (name.clone(), val_ty.clone()))
+                        .map(|(name, val_ty)| (name.clone(), state.tcx.get(*val_ty).clone()))
                         .collect::<Vec<(Arc<str>, Ty)>>(),
                 )?;
 
@@ -410,11 +414,13 @@ impl Compiler {
             } => {
                 let val = Self::compile_expr(state, value)?;
 
+                let obj_ty = state.tcx.get(*ty).clone();
+
                 // ARC: retain 新值
-                state.retain_if_needed(val, ty);
+                state.retain_if_needed(val, &obj_ty);
 
                 let symbol = state.table.borrow_mut().define(&name.value);
-                let cranelift_ty = convert_type_to_cranelift_type(ty);
+                let cranelift_ty = convert_type_to_cranelift_type(&obj_ty);
                 state
                     .builder
                     .try_declare_var(Variable::from_u32(symbol.var_index as u32), cranelift_ty)
@@ -478,7 +484,7 @@ impl Compiler {
 
             TypedStatement::Struct { ty, .. } => {
                 // 从 Type 中提取字段定义
-                let Ty::Struct { name, fields, .. } = ty else {
+                let Ty::Struct { name, fields, .. } = state.tcx.get(*ty) else {
                     return Err(format!("not a struct"));
                 };
 
@@ -487,7 +493,7 @@ impl Compiler {
                     name,
                     &fields
                         .iter()
-                        .map(|(name, val_ty)| (name.clone(), val_ty.clone()))
+                        .map(|(name, val_ty)| (name.clone(), state.tcx.get(*val_ty).clone()))
                         .collect::<Vec<(Arc<str>, Ty)>>(),
                 )?;
 
@@ -513,14 +519,14 @@ impl Compiler {
                     params_type,
                     ret_type,
                     ..
-                } = ty
+                } = state.tcx.get(*ty)
                 else {
                     return Err(format!("not a function: {ty}"));
                 };
 
                 let mut cranelift_params = params_type
                     .iter()
-                    .map(|it| AbiParam::new(convert_type_to_cranelift_type(it)))
+                    .map(|it| AbiParam::new(convert_type_to_cranelift_type(state.tcx.get(*it))))
                     .collect::<Vec<_>>();
 
                 // 构造签名
@@ -530,7 +536,9 @@ impl Compiler {
 
                 extern_func_sig
                     .returns
-                    .push(AbiParam::new(convert_type_to_cranelift_type(&ret_type)));
+                    .push(AbiParam::new(convert_type_to_cranelift_type(
+                        &state.tcx.get(*ret_type),
+                    )));
 
                 let extern_func_id = state
                     .module
@@ -570,7 +578,9 @@ impl Compiler {
             TypedStatement::Return { expr, .. } => {
                 let val = Self::compile_expr(state, expr)?;
 
-                state.retain_if_needed(val, &expr.get_type());
+                let obj_ty = state.tcx.get(expr.get_type()).clone();
+
+                state.retain_if_needed(val, &obj_ty);
 
                 state.builder.ins().return_(&[val]);
 
@@ -646,15 +656,15 @@ impl Compiler {
         expr: &TypedExpression,
     ) -> Result<Value, String> {
         match expr {
-            TypedExpression::Int { value, ty, .. } => Ok(state
-                .builder
-                .ins()
-                .iconst(convert_type_to_cranelift_type(ty), int_value_to_imm(value))),
+            TypedExpression::Int { value, ty, .. } => Ok(state.builder.ins().iconst(
+                convert_type_to_cranelift_type(state.tcx.get(*ty)),
+                int_value_to_imm(value),
+            )),
 
-            TypedExpression::Bool { value, ty, .. } => Ok(state
-                .builder
-                .ins()
-                .iconst(convert_type_to_cranelift_type(ty), *value as i64)),
+            TypedExpression::Bool { value, ty, .. } => Ok(state.builder.ins().iconst(
+                convert_type_to_cranelift_type(state.tcx.get(*ty)),
+                *value as i64,
+            )),
 
             TypedExpression::Ident(it, ty) => {
                 let sym = state.table.borrow_mut().get(&it.value);
@@ -686,12 +696,12 @@ impl Compiler {
                         .ins()
                         .global_value(platform_width_to_int_type(), global_var);
 
-                    if *ty == Ty::Str {
+                    if state.tcx.get(*ty) == &Ty::Str {
                         return Ok(val_ptr);
                     }
 
                     return Ok(state.builder.ins().load(
-                        convert_type_to_cranelift_type(ty),
+                        convert_type_to_cranelift_type(state.tcx.get(*ty)),
                         MemFlags::new(),
                         val_ptr,
                         0,
@@ -739,7 +749,7 @@ impl Compiler {
 
                 // 获取对象类型，确保是 struct
                 let obj_ty = obj.get_type();
-                let Ty::Struct { name, .. } = &obj_ty else {
+                let Ty::Struct { name, .. } = &state.tcx.get(obj_ty) else {
                     return Err("field access on non-struct type".into());
                 };
 
@@ -864,7 +874,7 @@ impl Compiler {
 
                     // 获取对象类型，确保是 struct
                     let obj_ty = obj.get_type();
-                    let Ty::Struct { name, .. } = &obj_ty else {
+                    let Ty::Struct { name, .. } = &state.tcx.get(obj_ty) else {
                         return Err("field set on non-struct type".into());
                     };
 
@@ -944,7 +954,7 @@ impl Compiler {
 
                 for param in params {
                     converted_params.push(AbiParam::new(convert_type_to_cranelift_type(
-                        &param.get_type(),
+                        &state.tcx.get(param.get_type()),
                     )));
                 }
 
@@ -952,12 +962,12 @@ impl Compiler {
                 ctx.func.signature = Signature::new(CALL_CONV);
                 ctx.func.signature.params.append(&mut converted_params);
 
-                if block_ast.get_type() != Ty::Unit {
+                if state.tcx.get(block_ast.get_type()) != &Ty::Unit {
                     ctx.func
                         .signature
                         .returns
                         .push(AbiParam::new(convert_type_to_cranelift_type(
-                            &block_ast.get_type(),
+                            state.tcx.get(block_ast.get_type()),
                         )));
                 }
 
@@ -1035,7 +1045,7 @@ impl Compiler {
                     for (i, param) in params.iter().enumerate() {
                         if let TypedExpression::TypeHint(param_name, _, ty) = &**param {
                             let symbol = func_symbol_table.borrow_mut().define(&param_name.value);
-                            let cranelift_ty = convert_type_to_cranelift_type(ty);
+                            let cranelift_ty = convert_type_to_cranelift_type(state.tcx.get(*ty));
 
                             func_builder.declare_var(
                                 Variable::from_u32(symbol.var_index as u32),
@@ -1048,12 +1058,14 @@ impl Compiler {
                         }
                     }
 
+                    let block_val_ty = state.tcx.get(block_ast.get_type()).clone();
+
                     // 9. 编译函数体
                     let mut func_state = FunctionState {
                         builder: func_builder,
                         module: state.module,
                         table: func_symbol_table,
-                        type_table: state.type_table.clone(),
+                        tcx: state.tcx,
                         function_map: state.function_map,
                         data_map: state.data_map,
                         target_isa: state.target_isa.clone(),
@@ -1065,7 +1077,7 @@ impl Compiler {
 
                     let result = Self::compile_expr(&mut func_state, block_ast)?;
 
-                    if block_ast.get_type() != Ty::Unit {
+                    if block_val_ty != Ty::Unit {
                         func_state.builder.ins().return_(&[result]);
                     } else {
                         func_state.builder.ins().return_(&[]);
@@ -1091,25 +1103,33 @@ impl Compiler {
                 func_ty,
                 ..
             } => {
-                let (params_type, ret_ty, va_arg) = match func_ty {
+                let (params_type, ret_ty, va_arg) = match state.tcx.get(*func_ty) {
                     Ty::Function {
                         params_type,
                         ret_type,
                         is_variadic,
-                    } => (params_type, ret_type, is_variadic),
+                    } => (params_type.clone(), *ret_type, *is_variadic),
                     _ => unreachable!(),
                 };
 
                 if let TypedExpression::FieldAccess(obj, field, _) = &**func
-                    && let Ty::Struct { name, fields, .. } = &obj.get_type()
+                    && let Ty::Struct { name, fields, .. } = state.tcx.get(obj.get_type())
                     && let Some(Ty::Function {
                         params_type,
                         ret_type,
                         ..
-                    }) = fields.get(&field.value)
+                    }) = fields
+                        .get(&field.value)
+                        .and_then(|ty| Some(state.tcx.get(*ty)))
                 {
                     // 函数名重命名
                     let func_name = format!("{}__{}", name, field.value);
+
+                    let func_ty_id = state.tcx.alloc(Ty::Function {
+                        params_type: params_type.clone(),
+                        ret_type: ret_type.clone(),
+                        is_variadic: false,
+                    });
 
                     let call_expr = TypedExpression::Call {
                         token: Token::new(
@@ -1133,11 +1153,8 @@ impl Compiler {
                             func_ty.clone(),
                         )),
                         args: args.clone(),
-                        func_ty: Ty::Function {
-                            params_type: params_type.clone(),
-                            ret_type: ret_type.clone(),
-                            is_variadic: false,
-                        },
+                        func_ty: func_ty_id,
+                        ret_ty,
                     };
 
                     return Self::compile_expr(state, &call_expr);
@@ -1158,7 +1175,7 @@ impl Compiler {
                 // 编译所有参数
                 let mut arg_values = Vec::new();
 
-                if *va_arg {
+                if va_arg {
                     for arg in args {
                         let arg_val = Self::compile_expr(state, arg)?;
                         arg_values.push(arg_val);
@@ -1166,13 +1183,14 @@ impl Compiler {
                 } else {
                     for (arg, arg_ty) in args.iter().zip(params_type.iter()) {
                         let v = Self::compile_expr(state, arg)?;
-                        state.retain_if_needed(v, arg_ty);
+                        let arg_ty = state.tcx.get(*arg_ty).clone();
+                        state.retain_if_needed(v, &arg_ty);
                         arg_values.push(v);
                     }
                 }
 
                 if let Some(fref) = direct_func
-                    && !*va_arg
+                    && !va_arg
                 {
                     // 直接 call
                     let call = state.builder.ins().call(fref, &arg_values);
@@ -1191,21 +1209,25 @@ impl Compiler {
                 // 创建函数签名
                 let mut sig = Signature::new(CALL_CONV);
 
-                if *va_arg {
+                if va_arg {
                     for arg in args {
                         sig.params
                             .push(AbiParam::new(convert_type_to_cranelift_type(
-                                &arg.get_type(),
+                                state.tcx.get(arg.get_type()),
                             )));
                     }
                 } else {
-                    for param_ty in params_type {
+                    for param_ty in &params_type {
                         sig.params
-                            .push(AbiParam::new(convert_type_to_cranelift_type(param_ty)));
+                            .push(AbiParam::new(convert_type_to_cranelift_type(
+                                state.tcx.get(*param_ty),
+                            )));
                     }
                 }
 
-                if **ret_ty != Ty::Unit {
+                let ret_ty = state.tcx.get(ret_ty);
+
+                if *ret_ty != Ty::Unit {
                     sig.returns
                         .push(AbiParam::new(convert_type_to_cranelift_type(ret_ty)));
                 }
@@ -1227,7 +1249,8 @@ impl Compiler {
                 };
 
                 for (val, ty) in arg_values.iter().zip(params_type.iter()) {
-                    state.release_if_needed(*val, ty);
+                    let ty = state.tcx.get(*ty).clone();
+                    state.release_if_needed(*val, &ty);
                 }
 
                 Ok(result)
@@ -1244,7 +1267,7 @@ impl Compiler {
 
                 state.builder.append_block_param(
                     end_block,
-                    convert_type_to_cranelift_type(&consequence.get_type()),
+                    convert_type_to_cranelift_type(state.tcx.get(consequence.get_type())),
                 );
 
                 let else_block_label = match else_block {
@@ -1417,7 +1440,7 @@ impl Compiler {
                     data_map: &mut self.data_map,
 
                     table: self.table,
-                    type_table: self.type_table,
+                    tcx: &mut self.tcx,
 
                     arc_alloc: self.arc_alloc,
                     arc_retain: self.arc_retain,
@@ -1467,7 +1490,7 @@ impl Compiler {
                 data_map: &mut self.data_map,
 
                 table: self.table,
-                type_table: self.type_table,
+                tcx: &mut self.tcx,
 
                 arc_alloc: self.arc_alloc,
                 arc_retain: self.arc_retain,
@@ -1490,17 +1513,12 @@ impl Compiler {
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        cell::RefCell,
-        path::Path,
-        rc::Rc,
-        sync::{Arc, Mutex},
-    };
+    use std::{cell::RefCell, path::Path, rc::Rc};
 
     use ant_lexer::Lexer;
     use ant_parser::Parser;
 
-    use ant_type_checker::{TypeChecker, table::TypeTable};
+    use ant_type_checker::{TypeChecker, ty_context::TypeContext};
 
     use crate::{
         compiler::{Compiler, compile_to_executable, create_target_isa, table::SymbolTable},
@@ -1542,11 +1560,9 @@ mod tests {
 
         let node = (&mut Parser::new(tokens)).parse_program().unwrap();
 
-        let type_table = Arc::new(Mutex::new(TypeTable::new().init()));
+        let mut tcx = TypeContext::new();
 
-        let mut typed_node = (&mut TypeChecker::new(type_table.clone()))
-            .check_node(node)
-            .unwrap();
+        let mut typed_node = (&mut TypeChecker::new(&mut tcx)).check_node(node).unwrap();
 
         // 创建编译器实例
         let table = SymbolTable::new();
@@ -1555,10 +1571,10 @@ mod tests {
             target_isa,
             "__simple_program__".into(),
             Rc::new(RefCell::new(table)),
-            type_table.clone(),
+            tcx.clone(),
         );
 
-        (&mut Monomorphizer::new())
+        (&mut Monomorphizer::new(&mut tcx))
             .monomorphize(&mut typed_node)
             .unwrap();
 

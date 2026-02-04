@@ -4,32 +4,25 @@ mod monomorphizer;
 mod traits;
 mod value;
 
-use std::{
-    cell::RefCell,
-    fs,
-    path::PathBuf,
-    rc::Rc, sync::{Arc, Mutex},
-};
+use std::{cell::RefCell, fs, path::PathBuf, rc::Rc, sync::Arc};
 
-use crate::{compiler::{
-    Compiler, compile_to_executable, create_target_isa, table::SymbolTable,
-}, monomorphizer::Monomorphizer};
+use crate::{
+    compiler::{Compiler, compile_to_executable, create_target_isa, table::SymbolTable},
+    monomorphizer::Monomorphizer,
+};
 
 use ant_lexer::Lexer;
 use ant_parser::{Parser, error::display_err};
 
-use ant_type_checker::{
-    TypeChecker,
-    table::TypeTable,
-};
+use ant_type_checker::{TypeChecker, ty_context::TypeContext};
 
 use clap::Parser as ClapParser;
 
-use crate::args::{Args, ARG};
+use crate::args::{ARG, Args};
 
 fn compile(arg: Args) {
     unsafe { ARG = Some(arg.clone()) };
-    
+
     let file_arc: Arc<str> = arg.file.clone().into();
     let file = PathBuf::from(arg.file);
 
@@ -60,9 +53,9 @@ fn compile(arg: Args) {
         }
     };
 
-    let type_table = Arc::new(Mutex::new(TypeTable::new().init()));
+    let mut type_context = TypeContext::new();
 
-    let mut checker = TypeChecker::new(type_table.clone());
+    let mut checker = TypeChecker::new(&mut type_context);
 
     let mut typed_program = match checker.check_node(program) {
         Ok(it) => it,
@@ -73,7 +66,7 @@ fn compile(arg: Args) {
         }
     };
 
-    let mut monomorphizer = Monomorphizer::new();
+    let mut monomorphizer = Monomorphizer::new(&mut type_context);
     match monomorphizer.monomorphize(&mut typed_program) {
         Ok(_) => (),
         Err(it) => {
@@ -87,7 +80,7 @@ fn compile(arg: Args) {
         create_target_isa(),
         file_arc.clone(),
         Rc::new(RefCell::new(SymbolTable::new())),
-        type_table.clone(),
+        type_context,
     );
 
     let code = match compiler.compile_program(typed_program) {
