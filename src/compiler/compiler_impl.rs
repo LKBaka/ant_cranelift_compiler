@@ -1518,7 +1518,11 @@ mod tests {
     use ant_lexer::Lexer;
     use ant_parser::Parser;
 
-    use ant_type_checker::{TypeChecker, ty_context::TypeContext};
+    use ant_type_checker::{
+        TypeChecker,
+        ty_context::TypeContext,
+        type_infer::{TypeInfer, infer_context::InferContext},
+    };
 
     use crate::{
         compiler::{Compiler, compile_to_executable, create_target_isa, table::SymbolTable},
@@ -1562,7 +1566,17 @@ mod tests {
 
         let mut tcx = TypeContext::new();
 
-        let mut typed_node = (&mut TypeChecker::new(&mut tcx)).check_node(node).unwrap();
+        let checker = &mut TypeChecker::new(&mut tcx);
+
+        let mut typed_node = checker.check_node(node).unwrap();
+
+        let constraints = checker.get_constraints().to_vec();
+
+        let mut infer_ctx = InferContext::new(&mut tcx);
+
+        let mut type_infer = TypeInfer::new(&mut infer_ctx);
+
+        type_infer.unify_all(constraints).unwrap();
 
         // 创建编译器实例
         let table = SymbolTable::new();

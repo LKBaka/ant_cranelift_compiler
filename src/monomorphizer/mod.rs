@@ -1,6 +1,6 @@
 use ant_token::token;
 use ant_token::token_type::TokenType;
-use ant_type_checker::ty::Ty;
+use ant_type_checker::ty::{Ty, TyId};
 use ant_type_checker::ty_context::TypeContext;
 use ant_type_checker::typed_ast::GetType;
 use ant_type_checker::typed_ast::typed_expr::TypedExpression;
@@ -20,7 +20,7 @@ struct GenericFunctionInfo {
 /// 单态化器主结构
 pub struct Monomorphizer<'a> {
     generic_functions: HashMap<String, GenericFunctionInfo>,
-    instances: Vec<(String, Vec<Ty>)>,
+    instances: Vec<(String, Vec<TyId>)>,
 
     tcx: &'a mut TypeContext,
 }
@@ -39,6 +39,7 @@ impl<'a> Monomorphizer<'a> {
         self.collect_generic_functions(node)?;
         self.collect_instances(node)?;
         self.generate_and_replace(node)?;
+
         Ok(())
     }
 
@@ -183,9 +184,9 @@ impl<'a> Monomorphizer<'a> {
                 if let TypedExpression::Ident(ident, _) = &**func {
                     let func_name = ident.value.as_ref();
                     if self.generic_functions.contains_key(func_name) {
-                        let arg_types: Vec<Ty> = args
+                        let arg_types: Vec<TyId> = args
                             .iter()
-                            .map(|a| self.tcx.get(a.get_type()).clone())
+                            .map(|a| a.get_type())
                             .collect();
                         let key = (func_name.to_string(), arg_types);
                         self.instances.push_no_repeat(key);
@@ -257,9 +258,8 @@ impl<'a> Monomorphizer<'a> {
                         column: 0,
                         file: "monomorphizer".into(),
                     });
-                    let original_t = self.tcx.get(*ty).clone();
-                    let t = self.substitute_generic_ty(&original_t, &type_map);
-                    *ty = self.tcx.alloc(t);
+                    let t = self.substitute_generic_ty(ty, &type_map);
+                    *ty = t;
                 }
 
                 new_stmts.push(TypedStatement::ExpressionStatement(*spec_func));
@@ -324,9 +324,9 @@ impl<'a> Monomorphizer<'a> {
                 if let TypedExpression::Ident(ident, _) = &mut **func {
                     if let Some(gen_info) = self.generic_functions.get(ident.value.as_ref()) {
                         // 构造实例化类型映射：泛型参数名 -> 实参类型
-                        let arg_types: Vec<Ty> = args
+                        let arg_types: Vec<TyId> = args
                             .iter()
-                            .map(|a| self.tcx.get(a.get_type()).clone())
+                            .map(|a| a.get_type())
                             .collect();
                         let mut type_map = HashMap::new();
                         for (param_name, concrete_ty) in
@@ -346,9 +346,8 @@ impl<'a> Monomorphizer<'a> {
                         ident.value = mangled.into();
 
                         // 同步把调用表达式的 func_ty 从泛型替到具体类型
-                        let original_t = self.tcx.get(*func_ty).clone();
-                        let t = self.substitute_generic_ty(&original_t, &type_map);
-                        *func_ty = self.tcx.alloc(t);
+                        let t = self.substitute_generic_ty(func_ty, &type_map);
+                        *func_ty = t;
                     }
                 }
 
@@ -410,19 +409,17 @@ impl<'a> Monomorphizer<'a> {
     fn substitute_generics_in_expr(
         &mut self,
         expr: &mut TypedExpression,
-        type_map: &HashMap<String, Ty>,
+        type_map: &HashMap<String, TyId>,
     ) {
         match expr {
             TypedExpression::Ident(_, ty) => {
-                let original_t = self.tcx.get(*ty).clone();
-                let t = self.substitute_generic_ty(&original_t, type_map);
-                *ty = self.tcx.alloc(t);
+                let t = self.substitute_generic_ty(ty, type_map);
+                *ty = t;
             }
 
             TypedExpression::TypeHint(_, _, ty) => {
-                let original_t = self.tcx.get(*ty).clone();
-                let t = self.substitute_generic_ty(&original_t, type_map);
-                *ty = self.tcx.alloc(t);
+                let t = self.substitute_generic_ty(ty, type_map);
+                *ty = t;
             }
 
             TypedExpression::Function {
@@ -432,9 +429,8 @@ impl<'a> Monomorphizer<'a> {
                     self.substitute_generics_in_expr(param, type_map);
                 }
                 self.substitute_generics_in_expr(block, type_map);
-                let original_t = self.tcx.get(*ty).clone();
-                let t = self.substitute_generic_ty(&original_t, type_map);
-                *ty = self.tcx.alloc(t);
+                let t = self.substitute_generic_ty(ty, type_map);
+                *ty = t;
             }
 
             TypedExpression::Call {
@@ -447,9 +443,8 @@ impl<'a> Monomorphizer<'a> {
                 for arg in args {
                     self.substitute_generics_in_expr(arg, type_map);
                 }
-                let original_t = self.tcx.get(*func_ty).clone();
-                let t = self.substitute_generic_ty(&original_t, type_map);
-                *func_ty = self.tcx.alloc(t);
+                let t = self.substitute_generic_ty(func_ty, type_map);
+                *func_ty = t;
             }
 
             TypedExpression::Infix { left, right, .. } => {
@@ -475,9 +470,8 @@ impl<'a> Monomorphizer<'a> {
                     self.substitute_generics_in_stmt(s, type_map);
                 }
 
-                let original_t = self.tcx.get(*ty).clone();
-                let t = self.substitute_generic_ty(&original_t, type_map);
-                *ty = self.tcx.alloc(t);
+                let t = self.substitute_generic_ty(ty, type_map);
+                *ty = t;
             }
 
             _ => {}
@@ -487,7 +481,7 @@ impl<'a> Monomorphizer<'a> {
     fn substitute_generics_in_stmt(
         &mut self,
         stmt: &mut TypedStatement,
-        type_map: &HashMap<String, Ty>,
+        type_map: &HashMap<String, TyId>,
     ) {
         match stmt {
             TypedStatement::ExpressionStatement(expr) => {
@@ -507,9 +501,8 @@ impl<'a> Monomorphizer<'a> {
                     self.substitute_generics_in_stmt(s, type_map);
                 }
 
-                let original_t = self.tcx.get(*ty).clone();
-                let t = self.substitute_generic_ty(&original_t, type_map);
-                *ty = self.tcx.alloc(t);
+                let t = self.substitute_generic_ty(ty, type_map);
+                *ty = t;
             }
 
             TypedStatement::While {
@@ -523,34 +516,41 @@ impl<'a> Monomorphizer<'a> {
         }
     }
 
-    fn substitute_generic_ty(&mut self, ty: &Ty, type_map: &HashMap<String, Ty>) -> Ty {
+    fn substitute_generic_ty(&mut self, tyid: &TyId, type_map: &HashMap<String, TyId>) -> TyId {
+        let ty = self.tcx.get(*tyid).clone();
+
         match ty {
             Ty::Generic(name, _) => type_map
                 .get(name.as_ref())
                 .cloned()
-                .unwrap_or_else(|| ty.clone()),
+                .unwrap_or_else(|| *tyid),
+            Ty::AppliedGeneric(name, args) => {
+                let new_args: Vec<TyId> = args
+                    .iter()
+                    .map(|id| self.substitute_generic_ty(id, type_map))
+                    .collect();
+
+                self.tcx.alloc(Ty::AppliedGeneric(name.clone(), new_args))
+            }
+
             Ty::Function {
                 params_type,
                 ret_type,
                 is_variadic,
-            } => Ty::Function {
-                params_type: params_type
-                    .iter()
-                    .map(|t| {
-                        let original_t = self.tcx.get(*t).clone();
-                        let ty = self.substitute_generic_ty(&original_t, type_map);
-                        self.tcx.alloc(ty)
-                    })
-                    .collect(),
-                ret_type: {
-                    let original_t = self.tcx.get(*ret_type).clone();
-                    let ty = self.substitute_generic_ty(&original_t, type_map);
-                    self.tcx.alloc(ty)
-                },
-                is_variadic: *is_variadic,
-            },
+            } => {
+                let ty = Ty::Function {
+                    params_type: params_type
+                        .iter()
+                        .map(|t| self.substitute_generic_ty(&t, type_map))
+                        .collect(),
+                    ret_type: self.substitute_generic_ty(&ret_type, type_map),
+                    is_variadic,
+                };
 
-            _ => ty.clone(),
+                self.tcx.alloc(ty)
+            }
+
+            _ => *tyid,
         }
     }
 }

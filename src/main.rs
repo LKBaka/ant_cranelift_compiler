@@ -14,7 +14,7 @@ use crate::{
 use ant_lexer::Lexer;
 use ant_parser::{Parser, error::display_err};
 
-use ant_type_checker::{TypeChecker, ty_context::TypeContext};
+use ant_type_checker::{TypeChecker, ty_context::TypeContext, type_infer::{TypeInfer, infer_context::InferContext}};
 
 use clap::Parser as ClapParser;
 
@@ -65,6 +65,21 @@ fn compile(arg: Args) {
             panic!("type checker error")
         }
     };
+
+    let constraints = checker.get_constraints().to_vec();
+
+    let mut infer_ctx = InferContext::new(&mut type_context);
+
+    let mut type_infer = TypeInfer::new(&mut infer_ctx);
+
+    match type_infer.unify_all(constraints) {
+        Ok(_) => (),
+        Err(err) => {
+            eprintln!("{err:#?}");
+            eprintln!();
+            panic!("type checker error")
+        }
+    }
 
     let mut monomorphizer = Monomorphizer::new(&mut type_context);
     match monomorphizer.monomorphize(&mut typed_program) {
