@@ -36,6 +36,7 @@ use crate::{
         constants::CALL_CONV,
         convert_type::convert_type_to_cranelift_type,
         generic::GenericInfo,
+        get_platform_width,
         handler::{compile_build_struct::compile_build_struct, compile_infix::compile_infix},
         imm::{int_value_to_imm, platform_width_to_int_type},
         table::{StructLayout, SymbolScope, SymbolTable, SymbolTy},
@@ -169,6 +170,18 @@ impl Compiler {
             Ty::Str => Ok(pointer_width),
             Ty::Function { .. } => Ok(pointer_width),
             Ty::Struct { name, .. } => {
+                let SymbolTy::Struct(layout) =
+                    state.get_table().borrow_mut().get(name).map_or_else(
+                        || Err(format!("undefine struct: {name}")),
+                        |it| Ok(it.symbol_ty),
+                    )?
+                else {
+                    Err(format!("not a struct: {name}"))?
+                };
+
+                Ok(layout.size)
+            }
+            Ty::AppliedGeneric(name, _) => {
                 let SymbolTy::Struct(layout) =
                     state.get_table().borrow_mut().get(name).map_or_else(
                         || Err(format!("undefine struct: {name}")),
@@ -734,6 +747,21 @@ impl Compiler {
                 *value as i64,
             )),
 
+            TypedExpression::SizeOf(_, it, ty) => {
+                let ty_size = Self::get_type_size(
+                    state,
+                    state.tcx.get(it.get_type()),
+                    get_platform_width() as u32,
+                )? as i64;
+
+                let ty = state.tcx.get(*ty);
+
+                Ok(state
+                    .builder
+                    .ins()
+                    .iconst(convert_type_to_cranelift_type(&ty), ty_size))
+            }
+
             TypedExpression::Ident(it, ty) => {
                 let sym = state.table.borrow_mut().get(&it.value);
                 if let Some(var) = &sym
@@ -817,7 +845,7 @@ impl Compiler {
 
                 // 获取对象类型，确保是 struct
                 let obj_ty = obj.get_type();
-                
+
                 let name = if let Ty::Struct { name, .. } = &state.tcx.get(obj_ty) {
                     name
                 } else if let Ty::AppliedGeneric(it, _) = &state.tcx.get(obj_ty) {
@@ -1472,7 +1500,7 @@ impl Compiler {
                     data_map: &mut self.data_map,
                     generic_map: &mut self.generic_map,
 
-                    table: self.table,
+                    table: Rc::new(RefCell::new(SymbolTable::from_outer(self.table))),
                     tcx: &mut self.tcx,
 
                     arc_alloc: self.arc_alloc,
@@ -1537,6 +1565,18 @@ impl Compiler {
                 }
 
                 Self::compile_top_level_stmt(&mut state, &stmt)?;
+            }
+
+            match self.context.verify(self.target_isa.as_ref()) {
+                Ok(_) => {}
+                Err(errors) => {
+                    let mut msg = String::new();
+                    for e in errors.0.iter() {
+                        use std::fmt::Write;
+                        writeln!(msg, "verifier: {}", e).unwrap();
+                    }
+                    return Err(format!("verifier errors:\n{}", msg));
+                }
             }
         }
 
