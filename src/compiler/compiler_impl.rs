@@ -32,9 +32,11 @@ use crate::{
     args::read_arg,
     compiler::{
         CompileState, Compiler, FunctionState, GlobalState,
+        compile_state_impl::PushGetGeneric,
         constants::CALL_CONV,
         convert_type::convert_type_to_cranelift_type,
-        handler::compile_infix::compile_infix,
+        generic::GenericInfo,
+        handler::{compile_build_struct::compile_build_struct, compile_infix::compile_infix},
         imm::{int_value_to_imm, platform_width_to_int_type},
         table::{StructLayout, SymbolScope, SymbolTable, SymbolTy},
     },
@@ -93,6 +95,7 @@ impl Compiler {
             context: cranelift_codegen::Context::new(),
             function_map: HashMap::new(),
             data_map: HashMap::new(),
+            generic_map: HashMap::new(),
             target_isa,
 
             table,
@@ -105,7 +108,7 @@ impl Compiler {
     }
 
     /// 在编译阶段计算 struct 布局（目标平台相关）
-    fn compile_struct_layout(
+    pub fn compile_struct_layout(
         state: &impl CompileState,
         name: &Arc<str>,
         fields: &[(Arc<str>, Ty)],
@@ -351,6 +354,7 @@ impl Compiler {
                         tcx: state.tcx,
                         function_map: state.function_map,
                         data_map: state.data_map,
+                        generic_map: state.generic_map,
                         target_isa: state.target_isa.clone(),
 
                         arc_alloc: state.arc_alloc,
@@ -380,7 +384,9 @@ impl Compiler {
                 todo!()
             }
 
-            TypedStatement::Struct { ty, name, .. } => {
+            TypedStatement::Struct {
+                ty, name, generics, ..
+            } => {
                 let name = &name.value;
 
                 // 从 Type 中提取字段定义
@@ -388,16 +394,45 @@ impl Compiler {
                     return Err(format!("not a struct"));
                 };
 
-                let layout = Self::compile_struct_layout(
-                    state,
-                    name,
-                    &fields
-                        .iter()
-                        .map(|(name, val_ty)| (name.clone(), state.tcx.get(*val_ty).clone()))
-                        .collect::<Vec<(Arc<str>, Ty)>>(),
-                )?;
+                // 检查是否为泛型
+                if generics.is_empty() {
+                    let layout = Self::compile_struct_layout(
+                        state,
+                        name,
+                        &fields
+                            .iter()
+                            .map(|(name, val_ty)| (name.clone(), state.tcx.get(*val_ty).clone()))
+                            .collect::<Vec<(Arc<str>, Ty)>>(),
+                    )?;
 
-                state.table.borrow_mut().define_struct_type(name, layout);
+                    state.table.borrow_mut().define_struct_type(name, layout);
+                } else {
+                    let generic_params = generics
+                        .iter()
+                        .map(|it| {
+                            let TypedExpression::Ident(it, _) = &**it else {
+                                todo!("todo generic expression: {it}")
+                            };
+
+                            it.value.clone()
+                        })
+                        .collect();
+
+                    let generic_fields = fields
+                        .iter()
+                        .map(|(name, id)| (name, state.tcx.get(*id)))
+                        .filter(|(_, it)| matches!(it, Ty::Generic(_, _)))
+                        .map(|(name, ty)| (name.clone(), ty.to_string().into()))
+                        .collect();
+
+                    state.push_generic(
+                        name.to_string(),
+                        GenericInfo::Struct {
+                            generic_params,
+                            generic_fields,
+                        },
+                    );
+                }
 
                 Ok(())
             }
@@ -482,22 +517,55 @@ impl Compiler {
                 Ok(state.builder.ins().iconst(types::I64, 0))
             }
 
-            TypedStatement::Struct { ty, .. } => {
+            TypedStatement::Struct {
+                ty, generics, name, ..
+            } => {
+                let name = &name.value;
+
                 // 从 Type 中提取字段定义
-                let Ty::Struct { name, fields, .. } = state.tcx.get(*ty) else {
+                let Ty::Struct { fields, .. } = state.tcx.get(*ty) else {
                     return Err(format!("not a struct"));
                 };
 
-                let layout = Self::compile_struct_layout(
-                    state,
-                    name,
-                    &fields
-                        .iter()
-                        .map(|(name, val_ty)| (name.clone(), state.tcx.get(*val_ty).clone()))
-                        .collect::<Vec<(Arc<str>, Ty)>>(),
-                )?;
+                // 检查是否为泛型
+                if generics.is_empty() {
+                    let layout = Self::compile_struct_layout(
+                        state,
+                        name,
+                        &fields
+                            .iter()
+                            .map(|(name, val_ty)| (name.clone(), state.tcx.get(*val_ty).clone()))
+                            .collect::<Vec<(Arc<str>, Ty)>>(),
+                    )?;
 
-                state.table.borrow_mut().define_struct_type(name, layout);
+                    state.table.borrow_mut().define_struct_type(name, layout);
+                } else {
+                    let generic_params = generics
+                        .iter()
+                        .map(|it| {
+                            let TypedExpression::Ident(it, _) = &**it else {
+                                todo!("todo generic expression: {it}")
+                            };
+
+                            it.value.clone()
+                        })
+                        .collect();
+
+                    let generic_fields = fields
+                        .iter()
+                        .map(|(name, id)| (name, state.tcx.get(*id)))
+                        .filter(|(_, it)| matches!(it, Ty::Generic(_, _)))
+                        .map(|(name, ty)| (name.clone(), ty.to_string().into()))
+                        .collect();
+
+                    state.push_generic(
+                        name.to_string(),
+                        GenericInfo::Struct {
+                            generic_params,
+                            generic_fields,
+                        },
+                    );
+                }
 
                 // unit
                 Ok(state.builder.ins().iconst(types::I64, 0))
@@ -749,7 +817,12 @@ impl Compiler {
 
                 // 获取对象类型，确保是 struct
                 let obj_ty = obj.get_type();
-                let Ty::Struct { name, .. } = &state.tcx.get(obj_ty) else {
+                
+                let name = if let Ty::Struct { name, .. } = &state.tcx.get(obj_ty) {
+                    name
+                } else if let Ty::AppliedGeneric(it, _) = &state.tcx.get(obj_ty) {
+                    it
+                } else {
                     return Err("field access on non-struct type".into());
                 };
 
@@ -790,49 +863,7 @@ impl Compiler {
             }
 
             TypedExpression::BuildStruct(_, struct_name, fields, _) => {
-                let SymbolTy::Struct(layout) = state
-                    .table
-                    .borrow_mut()
-                    .get(&struct_name.value)
-                    .map_or_else(
-                        || Err(format!("undefined struct: {struct_name}")),
-                        |it| Ok(it.symbol_ty),
-                    )?
-                else {
-                    Err(format!("not a struct: {struct_name}"))?
-                };
-
-                // 堆分配
-                let size_val = state
-                    .builder
-                    .ins()
-                    .iconst(platform_width_to_int_type(), layout.size as i64);
-                let struct_ptr = state.emit_alloc(size_val);
-
-                // 写字段
-                for (field_name, field_expr) in fields {
-                    let field_idx = layout
-                        .fields
-                        .iter()
-                        .position(|(n, _)| n == &field_name.value)
-                        .unwrap();
-
-                    let offset = layout.offsets[field_idx];
-                    let field_ptr = if offset == 0 {
-                        struct_ptr
-                    } else {
-                        state.builder.ins().iadd_imm(struct_ptr, offset as i64)
-                    };
-
-                    let field_val = Self::compile_expr(state, field_expr)?;
-                    state
-                        .builder
-                        .ins()
-                        .store(MemFlags::new(), field_val, field_ptr, 0);
-                }
-
-                // ref_count = 1，由 arc.c 保证
-                Ok(struct_ptr)
+                compile_build_struct(state, struct_name, fields)
             }
 
             TypedExpression::Assign { left, right, .. } => {
@@ -1068,6 +1099,7 @@ impl Compiler {
                         tcx: state.tcx,
                         function_map: state.function_map,
                         data_map: state.data_map,
+                        generic_map: state.generic_map,
                         target_isa: state.target_isa.clone(),
 
                         arc_alloc: state.arc_alloc,
@@ -1438,6 +1470,7 @@ impl Compiler {
                     module: &mut self.module,
                     function_map: &mut self.function_map,
                     data_map: &mut self.data_map,
+                    generic_map: &mut self.generic_map,
 
                     table: self.table,
                     tcx: &mut self.tcx,
@@ -1488,6 +1521,7 @@ impl Compiler {
                 module: &mut self.module,
                 function_map: &mut self.function_map,
                 data_map: &mut self.data_map,
+                generic_map: &mut self.generic_map,
 
                 table: self.table,
                 tcx: &mut self.tcx,
@@ -1524,10 +1558,7 @@ mod tests {
         type_infer::{TypeInfer, infer_context::InferContext},
     };
 
-    use crate::{
-        compiler::{Compiler, compile_to_executable, create_target_isa, table::SymbolTable},
-        monomorphizer::Monomorphizer,
-    };
+    use crate::compiler::{Compiler, compile_to_executable, create_target_isa, table::SymbolTable};
 
     #[test]
     fn simple_program() {
@@ -1568,7 +1599,7 @@ mod tests {
 
         let checker = &mut TypeChecker::new(&mut tcx);
 
-        let mut typed_node = checker.check_node(node).unwrap();
+        let typed_node = checker.check_node(node).unwrap();
 
         let constraints = checker.get_constraints().to_vec();
 
@@ -1587,10 +1618,6 @@ mod tests {
             Rc::new(RefCell::new(table)),
             tcx.clone(),
         );
-
-        (&mut Monomorphizer::new(&mut tcx))
-            .monomorphize(&mut typed_node)
-            .unwrap();
 
         // 编译程序
         match compiler.compile_program(typed_node) {
