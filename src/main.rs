@@ -57,7 +57,7 @@ fn compile(arg: Args) {
 
     let mut checker = TypeChecker::new(&mut type_context);
 
-    let mut typed_program = match checker.check_node(program) {
+    let typed_program = match checker.check_node(program) {
         Ok(it) => it,
         Err(err) => {
             eprintln!("{err:#?}");
