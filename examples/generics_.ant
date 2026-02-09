@@ -1,8 +1,8 @@
-func main() -> i32 {
-    struct A<T> { 
-        val: T
-    }
+struct A<T> { 
+    val: T
+}
 
+func main() -> i32 {
     let o = new A {
         val = "aaa"
     };
