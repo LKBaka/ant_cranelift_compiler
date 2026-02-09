@@ -1,20 +1,20 @@
 mod args;
 mod compiler;
-mod monomorphizer;
 mod traits;
 mod value;
 
 use std::{cell::RefCell, fs, path::PathBuf, rc::Rc, sync::Arc};
 
-use crate::{
-    compiler::{Compiler, compile_to_executable, create_target_isa, table::SymbolTable},
-    monomorphizer::Monomorphizer,
-};
+use crate::compiler::{Compiler, compile_to_executable, create_target_isa, table::SymbolTable};
 
 use ant_lexer::Lexer;
 use ant_parser::{Parser, error::display_err};
 
-use ant_type_checker::{TypeChecker, ty_context::TypeContext, type_infer::{TypeInfer, infer_context::InferContext}};
+use ant_type_checker::{
+    TypeChecker,
+    ty_context::TypeContext,
+    type_infer::{TypeInfer, infer_context::InferContext},
+};
 
 use clap::Parser as ClapParser;
 
@@ -78,16 +78,6 @@ fn compile(arg: Args) {
             eprintln!("{err:#?}");
             eprintln!();
             panic!("type checker error")
-        }
-    }
-
-    let mut monomorphizer = Monomorphizer::new(&mut type_context);
-    match monomorphizer.monomorphize(&mut typed_program) {
-        Ok(_) => (),
-        Err(it) => {
-            eprintln!("{it}");
-            eprintln!();
-            panic!("monomorphizer error")
         }
     }
 
