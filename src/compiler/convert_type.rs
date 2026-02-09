@@ -19,6 +19,7 @@ pub fn convert_type_to_cranelift_type(ty: &Ty) -> types::Type {
         }
         Ty::Bool => types::I8, // cranelift 没有比 i8 更小的类型了
         Ty::Struct { .. } => platform_width_to_int_type(),
+        Ty::AppliedGeneric(..) => platform_width_to_int_type(),
         Ty::Str => platform_width_to_int_type(),
         Ty::Function { .. } => platform_width_to_int_type(), // 以函数指针处理
         Ty::Unit => types::I8,
