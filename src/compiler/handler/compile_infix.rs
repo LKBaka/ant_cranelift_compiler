@@ -7,7 +7,7 @@ use ant_type_checker::{
 };
 use cranelift::prelude::{InstBuilder, IntCC, Value, types};
 
-use crate::compiler::{Compiler, FunctionState};
+use crate::compiler::{CompileResult, Compiler, FunctionState};
 
 macro_rules! four_fundamental_operations {
     ($op:ident) => {
@@ -102,7 +102,7 @@ pub fn compile_infix(
     op: Arc<str>,
     left: &Box<TypedExpression>,
     right: &Box<TypedExpression>,
-) -> Result<Value, String> {
+) -> CompileResult<Value> {
     #[rustfmt::skip]
     let mut non_const_handler = |
         left: &Box<TypedExpression>,
