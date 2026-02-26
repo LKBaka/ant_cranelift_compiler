@@ -5,19 +5,15 @@ use cranelift::prelude::{InstBuilder, MemFlags, Value};
 use indexmap::IndexMap;
 
 use crate::compiler::{
-    Compiler, FunctionState,
-    compile_state_impl::PushGetGeneric,
-    generic::GenericInfo,
-    imm::platform_width_to_int_type,
-    table::{StructLayout, SymbolTy},
+    CompileResult, Compiler, FunctionState, compile_state_impl::PushGetGeneric, generic::GenericInfo, imm::platform_width_to_int_type, table::{StructLayout, SymbolTy}
 };
 
 fn get_or_build_struct_layout(
     state: &mut FunctionState,
     struct_name: &Ident,
     fields: &IndexMap<Ident, TypedExpression>,
-) -> Result<StructLayout, String> {
-    if let Some(GenericInfo::Struct { .. }) = state.get_generic(struct_name.to_string()) {
+) -> CompileResult<StructLayout> {
+    if let Some(GenericInfo::Struct { .. }) = state.get_generic(&struct_name.to_string()) {
         let mut field_to_val_ty_mapping = IndexMap::new();
 
         for (field, val_expr) in fields {
@@ -58,7 +54,7 @@ pub fn compile_build_struct(
     state: &mut FunctionState,
     struct_name: &Ident,
     fields: &IndexMap<Ident, TypedExpression>,
-) -> Result<Value, String> {
+) -> CompileResult<Value> {
     let layout = get_or_build_struct_layout(state, struct_name, fields)?;
 
     // 堆分配

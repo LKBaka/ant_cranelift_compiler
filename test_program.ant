@@ -3,9 +3,7 @@ func main() -> i32 {
 
 	let a = 1i64;
 
-	func f() -> i64 {
-		a
-	}
+	return 91i32
 
-	printf("%d\n", a); 
+	printf("%d\n", a);
 }

@@ -2,6 +2,10 @@ struct A<T> {
     val: T
 }
 
+func f<T>(val: T) -> T {
+    val
+}
+
 func main() -> i32 {
     let o = new A {
         val = "aaa"
@@ -9,5 +13,6 @@ func main() -> i32 {
 
     extern "C" func printf(s: str, ...) -> i32;
 
-    printf("%s\n", o.val)
+    printf("generic struct.val: %s\n", o.val)
+    printf("generic func ret val: %s\n", f(o.val))
 }
