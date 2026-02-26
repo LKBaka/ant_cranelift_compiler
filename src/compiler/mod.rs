@@ -4,6 +4,7 @@ pub mod compile_state_impl;
 pub mod compiler_impl;
 pub mod handler;
 pub mod table;
+pub mod function;
 
 mod constants;
 mod convert_type;
@@ -22,11 +23,14 @@ use cranelift_codegen::{
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
 use cranelift_module::FuncId;
 use cranelift_object::ObjectModule;
+use indexmap::IndexMap;
 
-use crate::compiler::generic::GenericInfo;
+use crate::compiler::generic::{CompiledGenericInfo, GenericInfo};
 use crate::compiler::table::SymbolTable;
 
 use crate::args::read_arg;
+
+pub type CompileResult<T> = Result<T, String>;
 
 // 编译器结构体
 pub struct Compiler {
@@ -38,6 +42,7 @@ pub struct Compiler {
     function_map: HashMap<String, cranelift_module::FuncId>,
     data_map: HashMap<String, cranelift_module::DataId>,
     generic_map: HashMap<String, GenericInfo>,
+    compiled_generic_map: IndexMap<String, CompiledGenericInfo>,
 
     target_isa: Arc<dyn TargetIsa>,
 
@@ -56,6 +61,7 @@ pub struct GlobalState<'a> {
     pub function_map: &'a mut HashMap<String, cranelift_module::FuncId>,
     pub data_map: &'a mut HashMap<String, cranelift_module::DataId>,
     pub generic_map: &'a mut HashMap<String, GenericInfo>,
+    pub compiled_generic_map: &'a mut IndexMap<String, CompiledGenericInfo>,
 
     pub table: Rc<RefCell<SymbolTable>>,
 
@@ -74,6 +80,7 @@ pub struct FunctionState<'a> {
     pub function_map: &'a mut HashMap<String, cranelift_module::FuncId>,
     pub data_map: &'a mut HashMap<String, cranelift_module::DataId>,
     pub generic_map: &'a mut HashMap<String, GenericInfo>,
+    pub compiled_generic_map: &'a mut IndexMap<String, CompiledGenericInfo>,
 
     pub tcx: &'a mut TypeContext,
 
@@ -82,6 +89,8 @@ pub struct FunctionState<'a> {
     pub arc_alloc: FuncId,
     pub arc_retain: FuncId,
     pub arc_release: FuncId,
+
+    pub terminated: bool,
 }
 
 #[allow(unused)]
@@ -91,6 +100,7 @@ pub trait CompileState {
     fn get_function_map(&mut self) -> &mut HashMap<String, cranelift_module::FuncId>;
     fn get_data_map(&mut self) -> &mut HashMap<String, cranelift_module::DataId>;
     fn get_generic_map(&mut self) -> &mut HashMap<String, GenericInfo>;
+    fn get_compiled_generic_map(&mut self) -> &mut IndexMap<String, CompiledGenericInfo>;
     fn get_type_context(&mut self) -> &'_ mut TypeContext;
 
     fn get_table(&self) -> Rc<RefCell<SymbolTable>>;
@@ -304,6 +314,10 @@ impl CompileState for GlobalState<'_> {
         self.generic_map
     }
 
+    fn get_compiled_generic_map(&mut self) -> &mut IndexMap<String, CompiledGenericInfo> {
+        self.compiled_generic_map
+    }
+
     fn get_table(&self) -> Rc<RefCell<SymbolTable>> {
         self.table.clone()
     }
@@ -344,6 +358,10 @@ impl CompileState for FunctionState<'_> {
 
     fn get_generic_map(&mut self) -> &mut HashMap<String, GenericInfo> {
         self.generic_map
+    }
+
+    fn get_compiled_generic_map(&mut self) -> &mut IndexMap<String, CompiledGenericInfo> {
+        self.compiled_generic_map
     }
 
     fn get_table(&self) -> Rc<RefCell<SymbolTable>> {
