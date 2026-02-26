@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use clap::Parser;
+use clap::{Parser, builder::Str};
 
 #[derive(Parser, Debug, Clone)]
 #[command(
@@ -23,9 +23,25 @@ pub struct Args {
     #[arg(short = 'O', default_value = "0")]
     pub opt_level: OptLevelArg, 
 
+    /// 包含调试信息
+    #[arg(short = 'g', long = "debuginfo")]
+    pub debug_info: bool,
+
     /// 欲链接的静态库文件
     #[arg(short = 'l', long = "link")]
     pub link_with: Vec<String>,
+
+    /// 是否保留临时.o
+    #[arg(long = "keep-cache")]
+    pub keep_cache: bool,
+
+    /// 目标工具链
+    #[arg(short = 'T', long = "target-triple", default_value = "")]
+    pub target_triple: String,
+
+    /// 是否仅编译，不链接
+    #[arg(short = 'c', long = "compile-only")]
+    pub compile_only: bool,
 
     /// 脚本模式开关
     #[arg(long)]
