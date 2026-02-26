@@ -4,7 +4,7 @@ func main() -> i32 {
 	let a = 1i64;
 
 	func f() -> i64 {
-		a
+		let a = 110i64;
 	}
 
 	printf("%d\n", a); 

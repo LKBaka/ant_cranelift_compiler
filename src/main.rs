@@ -101,7 +101,7 @@ fn compile(arg: Args) {
     let output_file_stem = ".exe";
 
     #[cfg(not(windows))]
-    let output_file_stem = "";
+    let output_file_stem = ".out";
 
     let output_path = if let Some(it) = arg.output {
         PathBuf::from(it)
@@ -119,6 +119,7 @@ fn compile(arg: Args) {
         Ok(_) => (),
         Err(it) => println!("{it}"),
     }
+
 }
 
 fn main() {
