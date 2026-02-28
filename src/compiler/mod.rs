@@ -15,7 +15,7 @@ use std::env::{current_dir, current_exe};
 use std::path::PathBuf;
 use std::{collections::HashMap, fs, path::Path, rc::Rc, sync::Arc};
 
-use ant_type_checker::ty_context::TypeContext;
+use ant_type_checker::module::TypedModule;
 use cranelift_codegen::{
     isa::TargetIsa,
     settings,
@@ -33,7 +33,7 @@ use crate::args::read_arg;
 pub type CompileResult<T> = Result<T, String>;
 
 // 编译器结构体
-pub struct Compiler {
+pub struct Compiler<'a> {
     module: ObjectModule,
 
     builder_ctx: FunctionBuilderContext,
@@ -47,14 +47,14 @@ pub struct Compiler {
     target_isa: Arc<dyn TargetIsa>,
 
     table: Rc<RefCell<SymbolTable>>,
-    tcx: TypeContext,
+    typed_module: TypedModule<'a>,
 
     arc_alloc: FuncId,
     arc_retain: FuncId,
     arc_release: FuncId,
 }
 
-pub struct GlobalState<'a> {
+pub struct GlobalState<'a, 'b> {
     pub target_isa: Arc<dyn TargetIsa>,
     pub module: &'a mut ObjectModule,
     
@@ -65,14 +65,14 @@ pub struct GlobalState<'a> {
 
     pub table: Rc<RefCell<SymbolTable>>,
 
-    pub tcx: &'a mut TypeContext,
+    pub typed_module: &'a mut TypedModule<'b>,
 
     pub arc_alloc: FuncId,
     pub arc_retain: FuncId,
     pub arc_release: FuncId,
 }
 
-pub struct FunctionState<'a> {
+pub struct FunctionState<'a, 'b> {
     pub builder: FunctionBuilder<'a>,
     pub target_isa: Arc<dyn TargetIsa>,
     pub module: &'a mut ObjectModule,
@@ -82,7 +82,7 @@ pub struct FunctionState<'a> {
     pub generic_map: &'a mut HashMap<String, GenericInfo>,
     pub compiled_generic_map: &'a mut IndexMap<String, CompiledGenericInfo>,
 
-    pub tcx: &'a mut TypeContext,
+    pub typed_module: &'a mut TypedModule<'b>,
 
     pub table: Rc<RefCell<SymbolTable>>,
 
@@ -94,14 +94,15 @@ pub struct FunctionState<'a> {
 }
 
 #[allow(unused)]
-pub trait CompileState {
+pub trait CompileState<'a, 'b> {
     fn get_target_isa(&self) -> Arc<dyn TargetIsa>;
     fn get_module(&mut self) -> &mut ObjectModule;
     fn get_function_map(&mut self) -> &mut HashMap<String, cranelift_module::FuncId>;
     fn get_data_map(&mut self) -> &mut HashMap<String, cranelift_module::DataId>;
     fn get_generic_map(&mut self) -> &mut HashMap<String, GenericInfo>;
     fn get_compiled_generic_map(&mut self) -> &mut IndexMap<String, CompiledGenericInfo>;
-    fn get_type_context(&mut self) -> &'_ mut TypeContext;
+    fn get_typed_module(&'b mut self) -> &'a mut TypedModule<'b>;
+    fn get_typed_module_ref(&mut self) -> &TypedModule<'_>;
 
     fn get_table(&self) -> Rc<RefCell<SymbolTable>>;
 
@@ -293,7 +294,7 @@ pub fn get_platform_width() -> usize {
     return 16;
 }
 
-impl CompileState for GlobalState<'_> {
+impl<'a, 'b> CompileState<'a, 'b> for GlobalState<'a, 'b> {
     fn get_target_isa(&self) -> Arc<dyn TargetIsa> {
         self.target_isa.clone()
     }
@@ -322,8 +323,12 @@ impl CompileState for GlobalState<'_> {
         self.table.clone()
     }
 
-    fn get_type_context(&mut self) -> &'_ mut TypeContext {
-        self.tcx
+    fn get_typed_module(&'b mut self) -> &'a mut TypedModule<'b> {
+        self.typed_module
+    }
+
+    fn get_typed_module_ref(&mut self) -> &TypedModule<'_> {
+        self.typed_module
     }
 
     fn get_arc_alloc(&self) -> FuncId {
@@ -339,7 +344,7 @@ impl CompileState for GlobalState<'_> {
     }
 }
 
-impl CompileState for FunctionState<'_> {
+impl<'a, 'b> CompileState<'a, 'b> for FunctionState<'a, 'b> {
     fn get_target_isa(&self) -> Arc<dyn TargetIsa> {
         self.target_isa.clone()
     }
@@ -368,8 +373,12 @@ impl CompileState for FunctionState<'_> {
         self.table.clone()
     }
 
-    fn get_type_context(&mut self) -> &'_ mut TypeContext {
-        self.tcx
+    fn get_typed_module(&'b mut self) -> &'a mut TypedModule<'b> {
+        self.typed_module
+    }
+
+    fn get_typed_module_ref(&'_ mut self) -> &'_ TypedModule<'_> {
+        self.typed_module
     }
 
     fn get_arc_alloc(&self) -> FuncId {

@@ -11,9 +11,7 @@ use ant_lexer::Lexer;
 use ant_parser::{Parser, error::display_err};
 
 use ant_type_checker::{
-    TypeChecker,
-    ty_context::TypeContext,
-    type_infer::{TypeInfer, infer_context::InferContext},
+    TypeChecker, module::TypedModule, ty_context::TypeContext, type_infer::{TypeInfer, infer_context::InferContext}
 };
 
 use clap::Parser as ClapParser;
@@ -54,8 +52,9 @@ fn compile(arg: Args) {
     };
 
     let mut type_context = TypeContext::new();
+    let mut typed_module = TypedModule::new(&mut type_context);
 
-    let mut checker = TypeChecker::new(&mut type_context);
+    let mut checker = TypeChecker::new(&mut typed_module);
 
     let typed_program = match checker.check_node(program) {
         Ok(it) => it,
@@ -68,7 +67,7 @@ fn compile(arg: Args) {
 
     let constraints = checker.get_constraints().to_vec();
 
-    let mut infer_ctx = InferContext::new(&mut type_context);
+    let mut infer_ctx = InferContext::new(&mut typed_module);
 
     let mut type_infer = TypeInfer::new(&mut infer_ctx);
 
@@ -81,11 +80,20 @@ fn compile(arg: Args) {
         }
     }
 
+    match type_infer.infer() {
+        Ok(_) => (),
+        Err(err) => {
+            eprintln!("{err:#?}");
+            eprintln!();
+            panic!("type checker error")
+        }
+    }
+
     let compiler = Compiler::new(
         create_target_isa(),
         file_arc.clone(),
         Rc::new(RefCell::new(SymbolTable::new())),
-        type_context,
+        typed_module,
     );
 
     let code = match compiler.compile_program(typed_program) {

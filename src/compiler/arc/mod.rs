@@ -5,7 +5,7 @@ use cranelift_module::Module;
 
 use crate::{compiler::FunctionState, traits::NeedGc};
 
-impl<'a> FunctionState<'a> {
+impl<'a> FunctionState<'a, '_> {
     #[inline]
     pub fn emit_retain(&mut self, val: Value) {
         let fref = self

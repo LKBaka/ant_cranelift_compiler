@@ -27,7 +27,7 @@ macro_rules! const_eval_op {
     };
 }
 
-pub fn compile_infix_iadd(state: &mut FunctionState<'_>, left: IntValue, right: IntValue) -> Value {
+pub fn compile_infix_iadd(state: &mut FunctionState<'_, '_>, left: IntValue, right: IntValue) -> Value {
     match (left, right) {
         (IntValue::I64(l), IntValue::I64(r)) => const_eval_op!(state, types::I64, l + r),
         (IntValue::I32(l), IntValue::I32(r)) => const_eval_op!(state, types::I32, (l + r) as i64),
@@ -41,7 +41,7 @@ pub fn compile_infix_iadd(state: &mut FunctionState<'_>, left: IntValue, right: 
     }
 }
 
-pub fn compile_infix_isub(state: &mut FunctionState<'_>, left: IntValue, right: IntValue) -> Value {
+pub fn compile_infix_isub(state: &mut FunctionState<'_, '_>, left: IntValue, right: IntValue) -> Value {
     match (left, right) {
         (IntValue::I64(l), IntValue::I64(r)) => const_eval_op!(state, types::I64, l - r),
         (IntValue::I32(l), IntValue::I32(r)) => const_eval_op!(state, types::I32, (l - r) as i64),
@@ -55,7 +55,7 @@ pub fn compile_infix_isub(state: &mut FunctionState<'_>, left: IntValue, right: 
     }
 }
 
-pub fn compile_infix_imul(state: &mut FunctionState<'_>, left: IntValue, right: IntValue) -> Value {
+pub fn compile_infix_imul(state: &mut FunctionState<'_, '_>, left: IntValue, right: IntValue) -> Value {
     match (left, right) {
         (IntValue::I64(l), IntValue::I64(r)) => const_eval_op!(state, types::I64, l * r),
         (IntValue::I32(l), IntValue::I32(r)) => const_eval_op!(state, types::I32, (l * r) as i64),
@@ -69,7 +69,7 @@ pub fn compile_infix_imul(state: &mut FunctionState<'_>, left: IntValue, right: 
     }
 }
 
-pub fn compile_infix_ieq(state: &mut FunctionState<'_>, left: IntValue, right: IntValue) -> Value {
+pub fn compile_infix_ieq(state: &mut FunctionState<'_, '_>, left: IntValue, right: IntValue) -> Value {
     match (left, right) {
         (IntValue::I64(l), IntValue::I64(r)) => const_eval_op!(state, types::I8, (l == r) as i64),
         (IntValue::I32(l), IntValue::I32(r)) => const_eval_op!(state, types::I8, (l == r) as i64),
@@ -83,7 +83,7 @@ pub fn compile_infix_ieq(state: &mut FunctionState<'_>, left: IntValue, right: I
     }
 }
 
-pub fn compile_infix_ineq(state: &mut FunctionState<'_>, left: IntValue, right: IntValue) -> Value {
+pub fn compile_infix_ineq(state: &mut FunctionState<'_, '_>, left: IntValue, right: IntValue) -> Value {
     match (left, right) {
         (IntValue::I64(l), IntValue::I64(r)) => const_eval_op!(state, types::I8, (l != r) as i64),
         (IntValue::I32(l), IntValue::I32(r)) => const_eval_op!(state, types::I8, (l != r) as i64),
@@ -98,23 +98,25 @@ pub fn compile_infix_ineq(state: &mut FunctionState<'_>, left: IntValue, right: 
 }
 
 pub fn compile_infix(
-    state: &mut FunctionState<'_>,
+    state: &mut FunctionState<'_, '_>,
     op: Arc<str>,
-    left: &Box<TypedExpression>,
-    right: &Box<TypedExpression>,
+    left: &TypedExpression,
+    right: &TypedExpression,
 ) -> CompileResult<Value> {
     #[rustfmt::skip]
     let mut non_const_handler = |
-        left: &Box<TypedExpression>,
-        right: &Box<TypedExpression>,
+        left: &TypedExpression,
+        right: &TypedExpression,
         op: &str
     | {
         let lval = Compiler::compile_expr(state, &left)?;
         let rval = Compiler::compile_expr(state, &right)?;
 
-        match (state.tcx.get(left.get_type()), state.tcx.get(right.get_type())) {
+        let tcx = state.tcx();
+
+        match (tcx.get(left.get_type()), tcx.get(right.get_type())) {
             (Ty::IntTy(_), Ty::IntTy(_)) => {
-                type OpFunc = fn(&mut FunctionState<'_>, Value, Value) -> Value;
+                type OpFunc = fn(&mut FunctionState<'_, '_>, Value, Value) -> Value;
 
                 let op_func: OpFunc = match op {
                     "+" => four_fundamental_operations!(iadd),
@@ -132,7 +134,7 @@ pub fn compile_infix(
             }
 
             (Ty::Bool, Ty::Bool) => {
-                type OpFunc = fn(&mut FunctionState<'_>, Value, Value) -> Value;
+                type OpFunc = fn(&mut FunctionState<'_, '_>, Value, Value) -> Value;
 
                 let op_func: OpFunc = match op {
                     "==" => cmp!(IntCC::Equal),
@@ -143,11 +145,11 @@ pub fn compile_infix(
                 Ok(op_func(state, lval, rval))
             }
 
-            (lty, rty) => todo!("impl {left} {op} {right}. left_ty: {lty}, right_ty: {rty}"),
+            (lty, rty) => todo!("impl {lty} {op} {rty}"),
         }
     };
 
-    match (&**left, &**right, op.as_ref()) {
+    match (left, right, op.as_ref()) {
         (
             TypedExpression::Int { value: lval, .. },
             TypedExpression::Int { value: rval, .. },

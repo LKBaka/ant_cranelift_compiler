@@ -1,9 +1,12 @@
 use std::{cell::RefCell, rc::Rc};
 
-use crate::compiler::{CompileState, FunctionState, generic::{CompiledGenericInfo, GenericInfo}, table::SymbolTable};
+use ant_ast::{ExprId, StmtId};
+use ant_type_checker::{ty_context::TypeContext, typed_ast::{typed_expr::TypedExpression, typed_stmt::TypedStatement}};
+
+use crate::compiler::{CompileState, FunctionState, GlobalState, generic::{CompiledGenericInfo, GenericInfo}, table::SymbolTable};
 
 #[allow(unused)]
-impl<'a> FunctionState<'a> {
+impl<'a> FunctionState<'a, '_> {
     pub fn enter_scope(&mut self) {
         let outer = self.table.clone();
 
@@ -35,7 +38,7 @@ pub trait PushGetGeneric {
     fn get_generic(&mut self, name: &str) -> Option<GenericInfo>;
 } 
 
-impl<T: CompileState> PushGetGeneric for T {
+impl<'b, 'a, T: CompileState<'a, 'b>> PushGetGeneric for T {
     fn push_generic(&mut self, name: String, info: GenericInfo) {
         self.get_generic_map().insert(name, info);
     }
@@ -54,5 +57,61 @@ impl<T: CompileState> PushGetGeneric for T {
 
     fn pop_compiled_generic(&mut self, name: &str) -> Option<CompiledGenericInfo> {
         self.get_compiled_generic_map().shift_remove(name)
+    }
+}
+
+impl FunctionState<'_, '_> {
+    pub fn get_expr_ref(&self, id: ExprId) -> &TypedExpression {
+        self.typed_module.get_expr(id).unwrap()
+    }
+
+    pub fn get_expr_cloned(&self, id: ExprId) -> TypedExpression {
+        self.typed_module.get_expr(id).unwrap().clone()
+    }
+
+    pub fn get_stmt_ref(&self, id: StmtId) -> &TypedStatement {
+        self.typed_module.get_stmt(id).unwrap()
+    }
+
+    pub fn get_stmt_cloned(&self, id: StmtId) -> TypedStatement {
+        self.typed_module.get_stmt(id).unwrap().clone()
+    }
+}
+
+impl GlobalState<'_, '_> {
+    pub fn get_expr_ref(&self, id: ExprId) -> &TypedExpression {
+        self.typed_module.get_expr(id).unwrap()
+    }
+
+    pub fn get_expr_cloned(&self, id: ExprId) -> TypedExpression {
+        self.typed_module.get_expr(id).unwrap().clone()
+    }
+
+    pub fn get_stmt_ref(&self, id: StmtId) -> &TypedStatement {
+        self.typed_module.get_stmt(id).unwrap()
+    }
+
+    pub fn get_stmt_cloned(&self, id: StmtId) -> TypedStatement {
+        self.typed_module.get_stmt(id).unwrap().clone()
+    }
+}
+
+impl<'b, 'a> FunctionState<'a, 'b> {
+    pub fn tcx(&mut self) -> &mut TypeContext {
+        self.typed_module.tcx_mut()
+    }
+
+    pub fn tcx_ref(&self) -> &TypeContext {
+        self.typed_module.tcx_ref()
+    }
+}
+
+impl<'b, 'a> GlobalState<'a, 'b> {
+    pub fn tcx(&mut self) -> &mut TypeContext {
+        self.typed_module.tcx_mut()
+    }
+    
+    pub fn tcx_ref(&self) -> &TypeContext {
+        self.typed_module.tcx_ref()
     }
 }

@@ -18,8 +18,8 @@ use cranelift_module::{Linkage, Module, default_libcall_names};
 use cranelift_object::{ObjectBuilder, ObjectModule};
 
 use ant_type_checker::{
+    module::TypedModule,
     ty::{IntTy, Ty},
-    ty_context::TypeContext,
     typed_ast::{
         GetType, typed_expr::TypedExpression, typed_node::TypedNode, typed_stmt::TypedStatement,
     },
@@ -48,13 +48,13 @@ use crate::{
 
 pub static STR_COUNTER: AtomicUsize = AtomicUsize::new(1);
 
-impl Compiler {
+impl<'a> Compiler<'a> {
     pub fn new(
         target_isa: Arc<dyn TargetIsa>,
         file: Arc<str>,
         table: Rc<RefCell<SymbolTable>>,
-        tcx: TypeContext,
-    ) -> Compiler {
+        typed_module: TypedModule<'a>,
+    ) -> Compiler<'a> {
         // 创建 ObjectModule
         let builder =
             ObjectBuilder::new(target_isa.clone(), file.as_bytes(), default_libcall_names())
@@ -103,7 +103,7 @@ impl Compiler {
             target_isa,
 
             table,
-            tcx,
+            typed_module,
 
             arc_alloc,
             arc_release,
@@ -112,8 +112,8 @@ impl Compiler {
     }
 
     /// 在编译阶段计算 struct 布局（目标平台相关）
-    pub fn compile_struct_layout(
-        state: &impl CompileState,
+    pub fn compile_struct_layout<'aa, 'b>(
+        state: &impl CompileState<'aa, 'b>,
         name: &Arc<str>,
         fields: &[(Arc<str>, Ty)],
     ) -> Result<StructLayout, String> {
@@ -162,8 +162,8 @@ impl Compiler {
         })
     }
 
-    fn get_type_size(
-        state: &impl CompileState,
+    fn get_type_size<'aa, 'b>(
+        state: &impl CompileState<'aa, 'b>,
         ty: &Ty,
         pointer_width: u32,
     ) -> Result<u32, String> {
@@ -200,8 +200,8 @@ impl Compiler {
         }
     }
 
-    fn get_type_align(
-        state: &impl CompileState,
+    fn get_type_align<'aa, 'b>(
+        state: &impl CompileState<'aa, 'b>,
         ty: &Ty,
         pointer_width: u32,
     ) -> Result<u32, String> {
@@ -226,13 +226,20 @@ impl Compiler {
         }
     }
 
-    pub fn is_top_level_stmt(stmt: &TypedStatement) -> bool {
-        matches!(
+    pub fn is_top_level_stmt(state: &GlobalState, stmt: &TypedStatement) -> bool {
+        if matches!(
             stmt,
-            TypedStatement::ExpressionStatement(TypedExpression::Function { .. })
-                | TypedStatement::Const { .. }
-                | TypedStatement::Struct { .. }
-        )
+            TypedStatement::Const { .. } | TypedStatement::Struct { .. }
+        ) {
+            return true;
+        } else if let TypedStatement::ExpressionStatement(_, id, _) = stmt {
+            return matches!(
+                state.typed_module.get_expr(*id).unwrap(),
+                TypedExpression::Function { .. }
+            );
+        }
+
+        false
     }
 
     pub fn compile_top_level_stmt(
@@ -241,8 +248,10 @@ impl Compiler {
     ) -> Result<(), String> {
         match stmt {
             TypedStatement::Const { name, value, .. } => {
+                let value = state.get_expr_ref(*value);
+
                 let const_val = value.to_const().map_or_else(
-                    || Err(format!("expression `{value}` is not a constant")),
+                    || Err(format!("the expression is not a constant")),
                     |it| Ok(it),
                 )?;
 
@@ -264,221 +273,248 @@ impl Compiler {
 
                 Ok(())
             }
-            TypedStatement::ExpressionStatement(TypedExpression::Function {
-                name,
-                params,
-                block: block_ast,
-                generics_params: generics,
-                ty: tyid,
-                ..
-            }) => {
-                let Ty::Function {
-                    params_type,
-                    ret_type,
+
+            TypedStatement::ExpressionStatement(_, id, _) => {
+                if let TypedExpression::Function {
+                    name,
+                    params,
+                    block: block_ast,
+                    generics_params: generics,
+                    ty: tyid,
                     ..
-                } = state.tcx.get(*tyid)
-                else {
-                    unreachable!()
-                };
+                } = state.get_expr_ref(*id).clone()
+                {
+                    let Ty::Function {
+                        params_type,
+                        ret_type,
+                        ..
+                    } = state.tcx_ref().get(tyid)
+                    else {
+                        unreachable!()
+                    };
 
-                if let Some(name) = name.as_ref() {
-                    let name = &name.value;
+                    if let Some(name) = name.as_ref() {
+                        let name = &name.value;
 
-                    // 1. 检查是否为泛型
-                    if !generics.is_empty() {
-                        let Ty::Function { params_type, .. } = state.tcx.get(*tyid) else {
-                            unreachable!()
+                        // 1. 检查是否为泛型
+                        if !generics.is_empty() {
+                            let Ty::Function { params_type, .. } =
+                                state.tcx_ref().get(tyid).clone()
+                            else {
+                                unreachable!()
+                            };
+
+                            let param_names = params
+                                .iter()
+                                .map(|it| {
+                                    let it = state.get_expr_ref(*it);
+
+                                    let TypedExpression::TypeHint(it, _, _) = it else {
+                                        unreachable!()
+                                    };
+                                    it.value.clone()
+                                })
+                                .collect::<Vec<Arc<str>>>();
+
+                            let generic_params = param_names
+                                .iter()
+                                .zip(params_type.clone())
+                                .map(|(name, id)| (name, state.tcx_ref().get(id)))
+                                .filter(|(_, it)| matches!(it, Ty::Generic(_, _)))
+                                .map(|(name, ty)| (name.clone(), ty.to_string().into()))
+                                .collect();
+
+                            let all_params = param_names
+                                .iter()
+                                .zip(params_type)
+                                .map(|(name, id)| (name.clone(), id))
+                                .collect();
+
+                            state.push_generic(
+                                name.to_string(),
+                                GenericInfo::Function {
+                                    generic: generics
+                                        .iter()
+                                        .filter(|it| {
+                                            matches!(
+                                                state.get_expr_ref(**it),
+                                                TypedExpression::Ident(..)
+                                            )
+                                        })
+                                        .map(|it| {
+                                            let it = state.get_expr_ref(*it);
+
+                                            let TypedExpression::Ident(s, _) = it else {
+                                                unreachable!()
+                                            };
+                                            s.value.clone()
+                                        })
+                                        .collect::<Vec<Arc<str>>>(),
+                                    generic_params,
+                                    all_params,
+                                    block: Box::new(state.get_expr_cloned(block_ast)),
+                                    ret_ty: *ret_type,
+                                },
+                            );
+
+                            return Ok(());
+                        }
+
+                        let signature = make_signature(
+                            &params_type
+                                .iter()
+                                .map(|it| state.tcx_ref().get(*it))
+                                .collect::<Vec<&Ty>>(),
+                            state.tcx_ref().get(*ret_type),
+                        );
+
+                        let mut ctx = state.module.make_context();
+                        ctx.func.signature = signature.clone();
+
+                        // 2. 首先声明函数
+                        let func_id =
+                            match state
+                                .module
+                                .declare_function(&name, Linkage::Export, &signature)
+                            {
+                                Ok(it) => it,
+                                Err(it) => Err(it.to_string())?,
+                            };
+
+                        // 3. 立即将函数ID注册到function_map中
+                        state.function_map.insert(name.to_string(), func_id);
+
+                        // 4. 定义外部作用域的符号
+                        let _func_symbol = state.table.borrow_mut().define_func(&name);
+
+                        // 5. 创建新的编译上下文
+                        let mut func_builder_ctx = FunctionBuilderContext::new();
+                        let mut func_builder =
+                            FunctionBuilder::new(&mut ctx.func, &mut func_builder_ctx);
+
+                        let entry_block = func_builder.create_block();
+                        func_builder.append_block_params_for_function_params(entry_block);
+                        func_builder.switch_to_block(entry_block);
+                        func_builder.seal_block(entry_block);
+
+                        // 6. 创建函数内部的符号表
+                        let func_symbol_table =
+                            Rc::new(RefCell::new(SymbolTable::from_outer(state.table.clone())));
+
+                        // 7. 在函数内部符号表中也定义这个函数
+                        let inner_func_symbol = func_symbol_table.borrow_mut().define_func(&name);
+                        func_builder.declare_var(
+                            Variable::from_u32(inner_func_symbol.var_index as u32),
+                            platform_width_to_int_type(),
+                        );
+
+                        // 8. 在函数内部重新创建FuncRef和对应的Value
+                        let inner_func_ref = state
+                            .module
+                            .declare_func_in_func(func_id, &mut func_builder.func);
+                        let inner_ref_val = func_builder
+                            .ins()
+                            .func_addr(platform_width_to_int_type(), inner_func_ref);
+                        func_builder.def_var(
+                            Variable::from_u32(inner_func_symbol.var_index as u32),
+                            inner_ref_val, // 使用内部创建的Value
+                        );
+
+                        // 9. 声明参数变量
+                        for (i, param) in params.iter().enumerate() {
+                            let param = state.get_expr_ref(*param);
+
+                            if let TypedExpression::TypeHint(param_name, _, ty) = param {
+                                let symbol =
+                                    func_symbol_table.borrow_mut().define(&param_name.value);
+                                let cranelift_ty =
+                                    convert_type_to_cranelift_type(state.tcx_ref().get(*ty));
+
+                                func_builder.declare_var(
+                                    Variable::from_u32(symbol.var_index as u32),
+                                    cranelift_ty,
+                                );
+
+                                let param_value = func_builder.block_params(entry_block)[i];
+                                func_builder.def_var(
+                                    Variable::from_u32(symbol.var_index as u32),
+                                    param_value,
+                                );
+                            }
+                        }
+
+                        let block_ty_id = state.get_expr_ref(block_ast).get_type();
+
+                        let block_val_ty = state.tcx().get(block_ty_id).clone();
+
+                        let block = state.get_expr_ref(block_ast).clone();
+
+                        // 10. 编译函数体
+                        let mut func_state = FunctionState {
+                            builder: func_builder,
+                            module: state.module,
+                            table: func_symbol_table,
+                            typed_module: state.typed_module,
+                            function_map: state.function_map,
+                            data_map: state.data_map,
+                            generic_map: state.generic_map,
+                            compiled_generic_map: state.compiled_generic_map,
+                            target_isa: state.target_isa.clone(),
+
+                            arc_alloc: state.arc_alloc,
+                            arc_release: state.arc_release,
+                            arc_retain: state.arc_retain,
+
+                            terminated: false,
                         };
 
-                        let param_names = params
-                            .iter()
-                            .map(|it| {
-                                let TypedExpression::TypeHint(it, _, _) = &**it else {
-                                    unreachable!()
-                                };
-                                it.value.clone()
-                            })
-                            .collect::<Vec<Arc<str>>>();
+                        let result = Self::compile_expr(&mut func_state, &block)?;
 
-                        let generic_params = param_names
-                            .iter()
-                            .zip(params_type)
-                            .map(|(name, id)| (name, state.tcx.get(*id)))
-                            .filter(|(_, it)| matches!(it, Ty::Generic(_, _)))
-                            .map(|(name, ty)| (name.clone(), ty.to_string().into()))
-                            .collect();
+                        if !func_state.terminated {
+                            let symbols = state.table.borrow().map.clone();
 
-                        let all_params = param_names
-                            .iter()
-                            .zip(params_type)
-                            .map(|(name, id)| (name.clone(), *id))
-                            .collect();
+                            for (_, sym) in symbols {
+                                if sym.is_val && sym.symbol_ty.need_gc() {
+                                    let var = Variable::from_u32(sym.var_index as u32);
+                                    let val = func_state.builder.use_var(var);
+                                    func_state.emit_release(val);
+                                }
+                            }
 
-                        state.push_generic(
-                            name.to_string(),
-                            GenericInfo::Function {
-                                generic: generics
-                                    .iter()
-                                    .filter(|it| matches!(&***it, TypedExpression::Ident(..)))
-                                    .map(|it| {
-                                        let TypedExpression::Ident(s, _) = &**it else {
-                                            unreachable!()
-                                        };
-                                        s.value.clone()
-                                    })
-                                    .collect::<Vec<Arc<str>>>(),
-                                generic_params,
-                                all_params,
-                                block: block_ast.clone(),
-                                ret_ty: *ret_type,
-                            },
-                        );
+                            if block_val_ty != Ty::Unit {
+                                func_state.builder.ins().return_(&[result]);
+                            } else {
+                                func_state.builder.ins().return_(&[]);
+                            }
+                        }
+
+                        func_state.builder.finalize();
+
+                        match cranelift_codegen::verify_function(&ctx.func, &*state.target_isa) {
+                            Ok(_) => {}
+                            Err(errors) => {
+                                let mut msg = String::new();
+                                for e in errors.0.iter() {
+                                    use std::fmt::Write;
+                                    writeln!(msg, "verifier: {}", e).unwrap();
+                                }
+                                return Err(format!("verifier errors:\n{}", msg));
+                            }
+                        }
+
+                        state
+                            .module
+                            .define_function(func_id, &mut ctx)
+                            .map_or_else(|err| Err(err.to_string()), |_| Ok(()))?;
+                        state.module.clear_context(&mut ctx);
 
                         return Ok(());
                     }
 
-                    let signature = make_signature(
-                        &params_type
-                            .iter()
-                            .map(|it| state.tcx.get(*it))
-                            .collect::<Vec<&Ty>>(),
-                        state.tcx.get(*ret_type),
-                    );
-
-                    let mut ctx = state.module.make_context();
-                    ctx.func.signature = signature.clone();
-
-                    // 2. 首先声明函数
-                    let func_id =
-                        match state
-                            .module
-                            .declare_function(&name, Linkage::Export, &signature)
-                        {
-                            Ok(it) => it,
-                            Err(it) => Err(it.to_string())?,
-                        };
-
-                    // 3. 立即将函数ID注册到function_map中
-                    state.function_map.insert(name.to_string(), func_id);
-
-                    // 4. 定义外部作用域的符号
-                    let _func_symbol = state.table.borrow_mut().define_func(&name);
-
-                    // 5. 创建新的编译上下文
-                    let mut func_builder_ctx = FunctionBuilderContext::new();
-                    let mut func_builder =
-                        FunctionBuilder::new(&mut ctx.func, &mut func_builder_ctx);
-
-                    let entry_block = func_builder.create_block();
-                    func_builder.append_block_params_for_function_params(entry_block);
-                    func_builder.switch_to_block(entry_block);
-                    func_builder.seal_block(entry_block);
-
-                    // 6. 创建函数内部的符号表
-                    let func_symbol_table =
-                        Rc::new(RefCell::new(SymbolTable::from_outer(state.table.clone())));
-
-                    // 7. 在函数内部符号表中也定义这个函数
-                    let inner_func_symbol = func_symbol_table.borrow_mut().define_func(&name);
-                    func_builder.declare_var(
-                        Variable::from_u32(inner_func_symbol.var_index as u32),
-                        platform_width_to_int_type(),
-                    );
-
-                    // 8. 在函数内部重新创建FuncRef和对应的Value
-                    let inner_func_ref = state
-                        .module
-                        .declare_func_in_func(func_id, &mut func_builder.func);
-                    let inner_ref_val = func_builder
-                        .ins()
-                        .func_addr(platform_width_to_int_type(), inner_func_ref);
-                    func_builder.def_var(
-                        Variable::from_u32(inner_func_symbol.var_index as u32),
-                        inner_ref_val, // 使用内部创建的Value
-                    );
-
-                    // 9. 声明参数变量
-                    for (i, param) in params.iter().enumerate() {
-                        if let TypedExpression::TypeHint(param_name, _, ty) = &**param {
-                            let symbol = func_symbol_table.borrow_mut().define(&param_name.value);
-                            let cranelift_ty = convert_type_to_cranelift_type(state.tcx.get(*ty));
-
-                            func_builder.declare_var(
-                                Variable::from_u32(symbol.var_index as u32),
-                                cranelift_ty,
-                            );
-
-                            let param_value = func_builder.block_params(entry_block)[i];
-                            func_builder
-                                .def_var(Variable::from_u32(symbol.var_index as u32), param_value);
-                        }
-                    }
-
-                    let block_val_ty = state.tcx.get(block_ast.get_type()).clone();
-
-                    // 10. 编译函数体
-                    let mut func_state = FunctionState {
-                        builder: func_builder,
-                        module: state.module,
-                        table: func_symbol_table,
-                        tcx: state.tcx,
-                        function_map: state.function_map,
-                        data_map: state.data_map,
-                        generic_map: state.generic_map,
-                        compiled_generic_map: state.compiled_generic_map,
-                        target_isa: state.target_isa.clone(),
-
-                        arc_alloc: state.arc_alloc,
-                        arc_release: state.arc_release,
-                        arc_retain: state.arc_retain,
-
-                        terminated: false,
-                    };
-
-                    let result = Self::compile_expr(&mut func_state, block_ast)?;
-
-                    if !func_state.terminated {
-                        let symbols = state.table.borrow().map.clone();
-
-                        for (_, sym) in symbols {
-                            if sym.is_val && sym.symbol_ty.need_gc() {
-                                let var = Variable::from_u32(sym.var_index as u32);
-                                let val = func_state.builder.use_var(var);
-                                func_state.emit_release(val);
-                            }
-                        }
-
-                        if block_val_ty != Ty::Unit {
-                            func_state.builder.ins().return_(&[result]);
-                        } else {
-                            func_state.builder.ins().return_(&[]);
-                        }
-                    }
-
-                    func_state.builder.finalize();
-
-                    match cranelift_codegen::verify_function(&ctx.func, &*state.target_isa) {
-                        Ok(_) => {}
-                        Err(errors) => {
-                            let mut msg = String::new();
-                            for e in errors.0.iter() {
-                                use std::fmt::Write;
-                                writeln!(msg, "verifier: {}", e).unwrap();
-                            }
-                            return Err(format!("verifier errors:\n{}", msg));
-                        }
-                    }
-
-                    state
-                        .module
-                        .define_function(func_id, &mut ctx)
-                        .map_or_else(|err| Err(err.to_string()), |_| Ok(()))?;
-                    state.module.clear_context(&mut ctx);
-
-                    return Ok(());
-                }
-
-                todo!()
+                    todo!()
+                } else {
+                    todo!()
+                };
             }
 
             TypedStatement::Struct {
@@ -487,7 +523,7 @@ impl Compiler {
                 let name = &name.value;
 
                 // 从 Type 中提取字段定义
-                let Ty::Struct { fields, .. } = state.tcx.get(*ty) else {
+                let Ty::Struct { fields, .. } = state.tcx_ref().get(*ty) else {
                     return Err(format!("not a struct"));
                 };
 
@@ -498,7 +534,9 @@ impl Compiler {
                         name,
                         &fields
                             .iter()
-                            .map(|(name, val_ty)| (name.clone(), state.tcx.get(*val_ty).clone()))
+                            .map(|(name, val_ty)| {
+                                (name.clone(), state.tcx_ref().get(*val_ty).clone())
+                            })
                             .collect::<Vec<(Arc<str>, Ty)>>(),
                     )?;
 
@@ -507,8 +545,10 @@ impl Compiler {
                     let generic_params = generics
                         .iter()
                         .map(|it| {
-                            let TypedExpression::Ident(it, _) = &**it else {
-                                todo!("todo generic expression: {it}")
+                            let it = state.get_expr_ref(*it);
+
+                            let TypedExpression::Ident(it, _) = it else {
+                                todo!("todo generic expression")
                             };
 
                             it.value.clone()
@@ -517,7 +557,7 @@ impl Compiler {
 
                     let generic_fields = fields
                         .iter()
-                        .map(|(name, id)| (name, state.tcx.get(*id)))
+                        .map(|(name, id)| (name, state.tcx_ref().get(*id)))
                         .filter(|(_, it)| matches!(it, Ty::Generic(_, _)))
                         .map(|(name, ty)| (name.clone(), ty.to_string().into()))
                         .collect();
@@ -534,19 +574,25 @@ impl Compiler {
                 Ok(())
             }
 
-            stmt => todo!("impl function 'compile_stmt' {stmt}"),
+            _ => todo!("impl function 'compile_stmt'"),
         }
     }
 
     pub fn compile_stmt(state: &mut FunctionState, stmt: &TypedStatement) -> CompileResult<Value> {
         match stmt {
-            TypedStatement::ExpressionStatement(expr) => Self::compile_expr(state, expr),
+            TypedStatement::ExpressionStatement(_, expr, _) => {
+                let expr = state.get_expr_ref(*expr).clone();
+                Self::compile_expr(state, &expr)
+            }
+
             TypedStatement::Let {
                 name, value, ty, ..
             } => {
-                let val = Self::compile_expr(state, value)?;
+                let value = state.get_expr_ref(*value).clone();
 
-                let obj_ty = state.tcx.get(*ty).clone();
+                let val = Self::compile_expr(state, &value)?;
+
+                let obj_ty = state.tcx().get(*ty).clone();
 
                 // ARC: retain 新值
                 state.retain_if_needed(val, &obj_ty);
@@ -568,6 +614,8 @@ impl Compiler {
                 let mut ret_val = state.builder.ins().iconst(types::I64, 0);
 
                 for stmt in it {
+                    let stmt = state.get_stmt_ref(*stmt).clone();
+
                     ret_val = Self::compile_stmt(state, &stmt)?;
                 }
 
@@ -577,6 +625,9 @@ impl Compiler {
             TypedStatement::While {
                 condition, block, ..
             } => {
+                let condition = state.get_expr_ref(*condition).clone();
+                let block = state.get_stmt_ref(*block).clone();
+
                 let head = state.builder.create_block(); // while 头
                 let body = state.builder.create_block(); // 循环体
                 let exit = state.builder.create_block(); // 退出
@@ -584,14 +635,14 @@ impl Compiler {
                 state.builder.ins().jump(head, &[]);
 
                 state.builder.switch_to_block(head);
-                let condition_val = Self::compile_expr(state, condition)?;
+                let condition_val = Self::compile_expr(state, &condition)?;
                 state
                     .builder
                     .ins()
                     .brif(condition_val, body, &[], exit, &[]);
 
                 state.builder.switch_to_block(body);
-                let _body_val = Self::compile_stmt(state, &block.as_ref())?;
+                let _body_val = Self::compile_stmt(state, &block)?;
                 state.builder.ins().jump(head, &[]);
 
                 state.builder.seal_block(body);
@@ -610,7 +661,7 @@ impl Compiler {
                 let name = &name.value;
 
                 // 从 Type 中提取字段定义
-                let Ty::Struct { fields, .. } = state.tcx.get(*ty) else {
+                let Ty::Struct { fields, .. } = state.tcx_ref().get(*ty) else {
                     return Err(format!("not a struct"));
                 };
 
@@ -621,7 +672,9 @@ impl Compiler {
                         name,
                         &fields
                             .iter()
-                            .map(|(name, val_ty)| (name.clone(), state.tcx.get(*val_ty).clone()))
+                            .map(|(name, val_ty)| {
+                                (name.clone(), state.tcx_ref().get(*val_ty).clone())
+                            })
                             .collect::<Vec<(Arc<str>, Ty)>>(),
                     )?;
 
@@ -630,8 +683,10 @@ impl Compiler {
                     let generic_params = generics
                         .iter()
                         .map(|it| {
-                            let TypedExpression::Ident(it, _) = &**it else {
-                                todo!("todo generic expression: {it}")
+                            let it = state.get_expr_ref(*it);
+
+                            let TypedExpression::Ident(it, _) = it else {
+                                todo!("todo generic expression")
                             };
 
                             it.value.clone()
@@ -640,7 +695,7 @@ impl Compiler {
 
                     let generic_fields = fields
                         .iter()
-                        .map(|(name, id)| (name, state.tcx.get(*id)))
+                        .map(|(name, id)| (name, state.tcx_ref().get(*id)))
                         .filter(|(_, it)| matches!(it, Ty::Generic(_, _)))
                         .map(|(name, ty)| (name.clone(), ty.to_string().into()))
                         .collect();
@@ -674,14 +729,16 @@ impl Compiler {
                     params_type,
                     ret_type,
                     ..
-                } = state.tcx.get(*ty)
+                } = state.tcx_ref().get(*ty)
                 else {
                     return Err(format!("not a function: {ty}"));
                 };
 
                 let mut cranelift_params = params_type
                     .iter()
-                    .map(|it| AbiParam::new(convert_type_to_cranelift_type(state.tcx.get(*it))))
+                    .map(|it| {
+                        AbiParam::new(convert_type_to_cranelift_type(state.tcx_ref().get(*it)))
+                    })
                     .collect::<Vec<_>>();
 
                 // 构造签名
@@ -692,7 +749,7 @@ impl Compiler {
                 extern_func_sig
                     .returns
                     .push(AbiParam::new(convert_type_to_cranelift_type(
-                        &state.tcx.get(*ret_type),
+                        &state.tcx_ref().get(*ret_type),
                     )));
 
                 let extern_func_id = state
@@ -731,9 +788,11 @@ impl Compiler {
             }
 
             TypedStatement::Return { expr, .. } => {
-                let val = Self::compile_expr(state, expr)?;
+                let expr = state.get_expr_ref(*expr).clone();
 
-                let obj_ty = state.tcx.get(expr.get_type()).clone();
+                let val = Self::compile_expr(state, &expr)?;
+
+                let obj_ty = state.tcx().get(expr.get_type()).clone();
 
                 state.retain_if_needed(val, &obj_ty);
 
@@ -770,14 +829,20 @@ impl Compiler {
 
                 let type_name = impl_.value.clone();
 
-                let TypedStatement::Block { statements, .. } = &**block else {
+                let block = state.get_stmt_ref(*block).clone();
+
+                let TypedStatement::Block { statements, .. } = block else {
                     unreachable!();
                 };
 
                 for stmt in statements {
-                    let TypedStatement::ExpressionStatement(expr) = stmt else {
+                    let stmt = state.get_stmt_ref(stmt).clone();
+
+                    let TypedStatement::ExpressionStatement(_, expr, _) = stmt else {
                         continue;
                     };
+
+                    let expr = state.get_expr_ref(expr);
 
                     let TypedExpression::Function {
                         name: Some(fn_name),
@@ -814,30 +879,40 @@ impl Compiler {
                 Ok(state.builder.ins().iconst(platform_width_to_int_type(), 0))
             }
 
-            stmt => todo!("impl function 'compile_stmt' {stmt}"),
+            _ => todo!("impl function 'compile_stmt'"),
         }
     }
 
     pub fn compile_expr(state: &mut FunctionState, expr: &TypedExpression) -> CompileResult<Value> {
         match expr {
-            TypedExpression::Int { value, ty, .. } => Ok(state.builder.ins().iconst(
-                convert_type_to_cranelift_type(state.tcx.get(*ty)),
-                int_value_to_imm(value),
-            )),
+            TypedExpression::Int { value, ty, .. } => Ok({
+                let ty = state.tcx_ref().get(*ty).clone();
 
-            TypedExpression::Bool { value, ty, .. } => Ok(state.builder.ins().iconst(
-                convert_type_to_cranelift_type(state.tcx.get(*ty)),
-                *value as i64,
-            )),
+                state
+                    .builder
+                    .ins()
+                    .iconst(convert_type_to_cranelift_type(&ty), int_value_to_imm(value))
+            }),
+
+            TypedExpression::Bool { value, ty, .. } => Ok({
+                let ty = state.tcx_ref().get(*ty).clone();
+
+                state
+                    .builder
+                    .ins()
+                    .iconst(convert_type_to_cranelift_type(&ty), *value as i64)
+            }),
 
             TypedExpression::SizeOf(_, it, ty) => {
+                let val = state.get_expr_ref(*it).get_type();
+
                 let ty_size = Self::get_type_size(
                     state,
-                    state.tcx.get(it.get_type()),
+                    state.tcx_ref().get(val),
                     get_platform_width() as u32,
                 )? as i64;
 
-                let ty = state.tcx.get(*ty);
+                let ty = state.tcx_ref().get(*ty).clone();
 
                 Ok(state
                     .builder
@@ -875,12 +950,14 @@ impl Compiler {
                         .ins()
                         .global_value(platform_width_to_int_type(), global_var);
 
-                    if state.tcx.get(*ty) == &Ty::Str {
+                    if state.tcx().get(*ty) == &Ty::Str {
                         return Ok(val_ptr);
                     }
 
+                    let ty = state.tcx_ref().get(*ty).clone();
+
                     return Ok(state.builder.ins().load(
-                        convert_type_to_cranelift_type(state.tcx.get(*ty)),
+                        convert_type_to_cranelift_type(&ty),
                         MemFlags::new(),
                         val_ptr,
                         0,
@@ -922,16 +999,18 @@ impl Compiler {
                     .global_value(platform_width_to_int_type(), gv))
             }
 
-            TypedExpression::FieldAccess(obj, field, _) => {
+            TypedExpression::FieldAccess(_, obj, field, _) => {
+                let obj = state.get_expr_ref(*obj).clone();
+
                 // 编译对象表达式
                 let obj_ptr = Self::compile_expr(state, &obj)?;
 
                 // 获取对象类型，确保是 struct
                 let obj_ty = obj.get_type();
 
-                let name = if let Ty::Struct { name, .. } = &state.tcx.get(obj_ty) {
+                let name = if let Ty::Struct { name, .. } = &state.tcx_ref().get(obj_ty) {
                     name
-                } else if let Ty::AppliedGeneric(it, _) = &state.tcx.get(obj_ty) {
+                } else if let Ty::AppliedGeneric(it, _) = &state.tcx_ref().get(obj_ty) {
                     it
                 } else {
                     return Err("field access on non-struct type".into());
@@ -974,11 +1053,19 @@ impl Compiler {
             }
 
             TypedExpression::BuildStruct(_, struct_name, fields, _) => {
-                compile_build_struct(state, struct_name, fields)
+                let fields = fields
+                    .iter()
+                    .map(|(name, val_id)| (name.clone(), state.get_expr_cloned(*val_id)))
+                    .collect();
+
+                compile_build_struct(state, struct_name, &fields)
             }
 
             TypedExpression::Assign { left, right, .. } => {
-                if let TypedExpression::Ident(ident, _) = &**left {
+                let left = state.get_expr_ref(*left).clone();
+                let right = state.get_expr_ref(*right).clone();
+
+                if let TypedExpression::Ident(ident, _) = &left {
                     if left.get_type() != right.get_type() {
                         return Err(format!(
                             "expected: `{}`, got: `{}`",
@@ -1008,7 +1095,9 @@ impl Compiler {
                     state.builder.def_var(var, new_val);
 
                     return Ok(new_val); // 该值不会被使用
-                } else if let TypedExpression::FieldAccess(obj, field, _) = &**left {
+                } else if let TypedExpression::FieldAccess(_, obj, field, _) = left {
+                    let obj = state.get_expr_ref(obj).clone();
+
                     let new_val = Self::compile_expr(state, &right)?;
 
                     // 编译对象表达式
@@ -1016,7 +1105,7 @@ impl Compiler {
 
                     // 获取对象类型，确保是 struct
                     let obj_ty = obj.get_type();
-                    let Ty::Struct { name, .. } = &state.tcx.get(obj_ty) else {
+                    let Ty::Struct { name, .. } = &state.tcx_ref().get(obj_ty) else {
                         return Err("field set on non-struct type".into());
                     };
 
@@ -1098,7 +1187,7 @@ impl Compiler {
                     params_type,
                     ret_type,
                     ..
-                } = state.tcx.get(*tyid)
+                } = state.tcx_ref().get(*tyid)
                 else {
                     unreachable!()
                 };
@@ -1111,7 +1200,9 @@ impl Compiler {
                         let param_names = params
                             .iter()
                             .map(|it| {
-                                let TypedExpression::TypeHint(it, _, _) = &**it else {
+                                let it = state.get_expr_ref(*it);
+
+                                let TypedExpression::TypeHint(it, _, _) = it else {
                                     unreachable!()
                                 };
                                 it.value.clone()
@@ -1121,7 +1212,7 @@ impl Compiler {
                         let generic_params = param_names
                             .iter()
                             .zip(params_type)
-                            .map(|(name, id)| (name, state.tcx.get(*id)))
+                            .map(|(name, id)| (name, state.tcx_ref().get(*id)))
                             .filter(|(_, it)| matches!(it, Ty::Generic(_, _)))
                             .map(|(name, ty)| (name.clone(), ty.to_string().into()))
                             .collect();
@@ -1137,9 +1228,16 @@ impl Compiler {
                             GenericInfo::Function {
                                 generic: generics
                                     .iter()
-                                    .filter(|it| matches!(&***it, TypedExpression::Ident(..)))
+                                    .filter(|it| {
+                                        matches!(
+                                            state.get_expr_ref(**it),
+                                            TypedExpression::Ident(..)
+                                        )
+                                    })
                                     .map(|it| {
-                                        let TypedExpression::Ident(s, _) = &**it else {
+                                        let it = state.get_expr_ref(*it);
+
+                                        let TypedExpression::Ident(s, _) = it else {
                                             unreachable!()
                                         };
                                         s.value.clone()
@@ -1147,7 +1245,7 @@ impl Compiler {
                                     .collect::<Vec<Arc<str>>>(),
                                 generic_params,
                                 all_params,
-                                block: block_ast.clone(),
+                                block: Box::new(state.get_expr_cloned(*block_ast)),
                                 ret_ty: *ret_type,
                             },
                         );
@@ -1158,9 +1256,9 @@ impl Compiler {
                     let signature = make_signature(
                         &params_type
                             .iter()
-                            .map(|it| state.tcx.get(*it))
+                            .map(|it| state.tcx_ref().get(*it))
                             .collect::<Vec<&Ty>>(),
-                        state.tcx.get(*ret_type),
+                        state.tcx_ref().get(*ret_type),
                     );
 
                     // 2. 首先声明函数
@@ -1176,14 +1274,20 @@ impl Compiler {
                     // 3. 立即将函数ID注册到function_map中
                     state.function_map.insert(name.to_string(), func_id);
 
+                    let block_ast = state.get_expr_ref(*block_ast).clone();
+
                     return compile_function(
                         state,
                         signature,
                         &params
                             .iter()
-                            .filter(|it| matches!(&***it, TypedExpression::TypeHint(..)))
+                            .filter(|it| {
+                                matches!(state.get_expr_ref(**it), TypedExpression::TypeHint(..))
+                            })
                             .map(|it| {
-                                if let TypedExpression::TypeHint(it, _, id) = &**it {
+                                let it = state.get_expr_ref(*it);
+
+                                if let TypedExpression::TypeHint(it, _, id) = it {
                                     (it.value.clone(), *id)
                                 } else {
                                     unreachable!()
@@ -1191,7 +1295,7 @@ impl Compiler {
                             })
                             .collect(),
                         block_ast.get_type(),
-                        block_ast,
+                        &block_ast,
                         name,
                     );
                 }
@@ -1203,9 +1307,12 @@ impl Compiler {
                 func,
                 args,
                 func_ty,
-                ret_ty,
                 ..
-            } => compile_call(state, func, args, func_ty),
+            } => {
+                let func = state.get_expr_ref(*func).clone();
+
+                compile_call(state, &func, &args, func_ty)
+            }
 
             TypedExpression::If {
                 condition,
@@ -1213,13 +1320,17 @@ impl Compiler {
                 else_block,
                 ..
             } => {
+                let condition = state.get_expr_ref(*condition).clone();
+                let consequence = state.get_expr_ref(*consequence).clone();
+
                 let then_block = state.builder.create_block();
                 let end_block = state.builder.create_block();
 
-                state.builder.append_block_param(
-                    end_block,
-                    convert_type_to_cranelift_type(state.tcx.get(consequence.get_type())),
-                );
+                let consequence_ty = state.tcx().get(consequence.get_type()).clone();
+
+                state
+                    .builder
+                    .append_block_param(end_block, convert_type_to_cranelift_type(&consequence_ty));
 
                 let else_block_label = match else_block {
                     Some(_) => Some(state.builder.create_block()),
@@ -1246,7 +1357,8 @@ impl Compiler {
 
                 if let Some(else_block_label) = else_block_label {
                     state.builder.switch_to_block(else_block_label);
-                    let else_val = Self::compile_expr(state, else_block.as_ref().unwrap())?;
+                    let expr = state.get_expr_ref(else_block.unwrap()).clone();
+                    let else_val = Self::compile_expr(state, &expr)?;
                     state.builder.ins().jump(end_block, &[else_val]);
                     state.builder.seal_block(else_block_label);
                 }
@@ -1260,11 +1372,18 @@ impl Compiler {
 
             TypedExpression::Infix {
                 op, left, right, ..
-            } => compile_infix(state, op.clone(), left, right),
+            } => {
+                let left = state.get_expr_ref(*left).clone();
+                let right = state.get_expr_ref(*right).clone();
+
+                compile_infix(state, op.clone(), &left, &right)
+            }
             TypedExpression::Block(_, it, _) => {
                 let mut ret_val = state.builder.ins().iconst(types::I64, 0);
 
                 for stmt in it {
+                    let stmt = state.get_stmt_ref(*stmt).clone();
+
                     ret_val = Self::compile_stmt(state, &stmt)?;
 
                     if state.terminated {
@@ -1276,13 +1395,16 @@ impl Compiler {
             }
 
             TypedExpression::BoolAnd { left, right, .. } => {
+                let left = state.get_expr_ref(*left).clone();
+                let right = state.get_expr_ref(*right).clone();
+
                 let true_block = state.builder.create_block();
                 let false_block = state.builder.create_block();
                 let merge_block = state.builder.create_block();
 
                 state.builder.append_block_param(merge_block, types::I8);
 
-                let lval = Self::compile_expr(state, left)?;
+                let lval = Self::compile_expr(state, &left)?;
                 let zero = state.builder.ins().iconst(types::I8, 0);
 
                 let cond = state.builder.ins().icmp(IntCC::NotEqual, lval, zero);
@@ -1295,7 +1417,7 @@ impl Compiler {
 
                 // true: 继续算 right
                 state.builder.switch_to_block(true_block);
-                let rval = Self::compile_expr(state, right)?;
+                let rval = Self::compile_expr(state, &right)?;
                 state.builder.ins().jump(merge_block, &[rval]);
                 state.builder.seal_block(true_block);
 
@@ -1311,13 +1433,16 @@ impl Compiler {
             }
 
             TypedExpression::BoolOr { left, right, .. } => {
+                let left = state.get_expr_ref(*left).clone();
+                let right = state.get_expr_ref(*right).clone();
+
                 let true_block = state.builder.create_block();
                 let false_block = state.builder.create_block();
                 let merge_block = state.builder.create_block();
 
                 state.builder.append_block_param(merge_block, types::I8);
 
-                let lval = Self::compile_expr(state, left)?;
+                let lval = Self::compile_expr(state, &left)?;
                 let zero = state.builder.ins().iconst(types::I8, 0);
 
                 let cond = state.builder.ins().icmp(IntCC::NotEqual, lval, zero);
@@ -1336,7 +1461,7 @@ impl Compiler {
 
                 // false: 才算 right
                 state.builder.switch_to_block(false_block);
-                let rval = Self::compile_expr(state, right)?;
+                let rval = Self::compile_expr(state, &right)?;
                 state.builder.ins().jump(merge_block, &[rval]);
                 state.builder.seal_block(false_block);
 
@@ -1387,7 +1512,7 @@ impl Compiler {
                     compiled_generic_map: &mut self.compiled_generic_map,
 
                     table: Rc::new(RefCell::new(SymbolTable::from_outer(self.table))),
-                    tcx: &mut self.tcx,
+                    typed_module: &mut self.typed_module,
 
                     arc_alloc: self.arc_alloc,
                     arc_retain: self.arc_retain,
@@ -1397,6 +1522,8 @@ impl Compiler {
                 };
 
                 for stmt in statements {
+                    let stmt = state.typed_module.get_stmt(stmt).unwrap().clone();
+
                     ret_val = Self::compile_stmt(&mut state, &stmt)?;
 
                     if state.terminated {
@@ -1435,7 +1562,7 @@ impl Compiler {
                 compiled_generic_map: &mut self.compiled_generic_map,
 
                 table: self.table,
-                tcx: &mut self.tcx,
+                typed_module: &mut self.typed_module,
 
                 arc_alloc: self.arc_alloc,
                 arc_retain: self.arc_retain,
@@ -1443,7 +1570,9 @@ impl Compiler {
             };
 
             for stmt in statements {
-                if !Self::is_top_level_stmt(&stmt) {
+                let stmt = state.typed_module.get_stmt(stmt).unwrap().clone();
+
+                if !Self::is_top_level_stmt(&state, &stmt) {
                     continue;
                 }
 
@@ -1477,6 +1606,7 @@ mod tests {
 
     use ant_type_checker::{
         TypeChecker,
+        module::TypedModule,
         ty_context::TypeContext,
         type_infer::{TypeInfer, infer_context::InferContext},
     };
@@ -1520,13 +1650,15 @@ mod tests {
 
         let mut tcx = TypeContext::new();
 
-        let checker = &mut TypeChecker::new(&mut tcx);
+        let mut module = TypedModule::new(&mut tcx);
+
+        let checker = &mut TypeChecker::new(&mut module);
 
         let typed_node = checker.check_node(node).unwrap();
 
         let constraints = checker.get_constraints().to_vec();
 
-        let mut infer_ctx = InferContext::new(&mut tcx);
+        let mut infer_ctx = InferContext::new(&mut module);
 
         let mut type_infer = TypeInfer::new(&mut infer_ctx);
 
@@ -1539,7 +1671,7 @@ mod tests {
             target_isa,
             "__simple_program__".into(),
             Rc::new(RefCell::new(table)),
-            tcx.clone(),
+            module,
         );
 
         // 编译程序

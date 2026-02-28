@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use clap::{Parser, builder::Str};
+use clap::Parser;
 
 #[derive(Parser, Debug, Clone)]
 #[command(

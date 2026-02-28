@@ -24,7 +24,7 @@ fn get_or_build_struct_layout(
 
         for (field, tyid) in field_to_val_ty_mapping {
             // 相信外部数据 这里不作检查
-            fields.push((field, state.tcx.get(tyid).clone()));
+            fields.push((field, state.tcx().get(tyid).clone()));
         }
 
         let layout = Compiler::compile_struct_layout(state, &struct_name.value, fields.as_slice())?;

@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use ant_ast::node::GetToken;
+use ant_ast::{ExprId, node::GetToken};
 use ant_token::{token::Token, token_type::TokenType};
 use ant_type_checker::{
     ty::{Ty, TyId},
@@ -23,8 +23,8 @@ use crate::compiler::{
 
 fn compile_call_method(
     state: &mut FunctionState,
-    func: &Box<TypedExpression>,
-    args: &Vec<Box<TypedExpression>>,
+    func: &TypedExpression,
+    args: &Vec<ExprId>,
     func_ty: &TyId,
 
     original_func_ret_ty: &usize,
@@ -39,7 +39,7 @@ fn compile_call_method(
     // 函数名重命名
     let func_name = format!("{}__{}", name, field.value);
 
-    let func_ty_id = state.tcx.alloc(Ty::Function {
+    let func_ty_id = state.tcx().alloc(Ty::Function {
         params_type: params_type.clone(),
         ret_type: ret_type.clone(),
         is_variadic: false,
@@ -53,7 +53,7 @@ fn compile_call_method(
             func.token().line,
             func.token().column,
         ), // 充填伪造 Token
-        func: Box::new(TypedExpression::Ident(
+        func: state.typed_module.alloc_expr(TypedExpression::Ident(
             Ident {
                 value: func_name.clone().into(),
                 token: Token::new(
@@ -76,11 +76,11 @@ fn compile_call_method(
 
 fn compile_call_generic(
     state: &mut FunctionState,
-    func: &Box<TypedExpression>,
-    args: &Vec<Box<TypedExpression>>,
+    func: &TypedExpression,
+    args: &Vec<ExprId>,
     func_ty: &TyId,
 ) -> CompileResult<Value> {
-    let TypedExpression::Ident(name_ident, _) = &**func else {
+    let TypedExpression::Ident(name_ident, _) = func else {
         return Err(format!("unsupport generic lambda fucntion"));
     };
 
@@ -91,19 +91,26 @@ fn compile_call_generic(
         ret_ty,
         block,
         ..
-    } = state.generic_map.get(name.as_ref()).map_or_else(
-        || Err(format!("generic function `{name}` not in generic map")),
-        |it| Ok(it),
-    )?
+    } = state
+        .generic_map
+        .get(name.as_ref())
+        .map_or_else(
+            || Err(format!("generic function `{name}` not in generic map")),
+            |it| Ok(it),
+        )?
+        .clone()
     else {
         return Err(format!("`{name}` is not a generic function"));
     };
 
-    let arg_tyids = args.iter().map(|it| it.get_type()).collect::<Vec<TyId>>();
+    let arg_tyids = args
+        .iter()
+        .map(|it| state.get_expr_ref(*it).get_type())
+        .collect::<Vec<TyId>>();
 
     let arg_types = arg_tyids
         .iter()
-        .map(|it| state.tcx.get(*it))
+        .map(|it| state.typed_module.tcx_ref().get(*it))
         .collect::<Vec<&Ty>>();
 
     let mangled_func_name = mangle_func(&name, &arg_types);
@@ -112,7 +119,7 @@ fn compile_call_generic(
     let mut generic_param_to_real_types = IndexMap::new();
 
     for ((param_name, param_tyid), arg_tyid) in all_params.iter().zip(arg_tyids) {
-        let param_ty = state.tcx.get(*param_tyid);
+        let param_ty = state.tcx().get(*param_tyid);
 
         if !matches!(param_ty, Ty::Generic(..)) {
             // 不是泛型参数 选用默认的形参类型
@@ -125,7 +132,7 @@ fn compile_call_generic(
         }
     }
 
-    let ret_tyid = if let Ty::Generic(name, _need_traits) = state.tcx.get(*ret_ty) {
+    let ret_tyid = if let Ty::Generic(name, _need_traits) = state.tcx().get(ret_ty) {
         // 是泛型 从泛型表中获取实际类型
         let Some(real_ty) = generic_param_to_real_types.get(name.as_ref()) else {
             return Err(format!("type `{name}` not found"));
@@ -134,15 +141,15 @@ fn compile_call_generic(
         *real_ty
     } else {
         // 不是泛型 直接使用原有类型
-        *ret_ty
+        ret_ty
     };
 
     let signature = make_signature(
         &new_param_types
             .iter()
-            .map(|(_, tyid)| state.tcx.get(*tyid))
+            .map(|(_, tyid)| state.typed_module.tcx_ref().get(*tyid))
             .collect::<Vec<_>>(),
-        state.tcx.get(ret_tyid),
+        state.typed_module.tcx_ref().get(ret_tyid),
     );
 
     // 声明并注册函数
@@ -158,9 +165,6 @@ fn compile_call_generic(
     state
         .function_map
         .insert(mangled_func_name.to_string(), func_id);
-
-    let _ = all_params;
-    let _ = ret_ty;
 
     let block = block.clone();
 
@@ -187,11 +191,11 @@ fn compile_call_generic(
 
 pub fn compile_call(
     state: &mut FunctionState,
-    func: &Box<TypedExpression>,
-    args: &Vec<Box<TypedExpression>>,
+    func: &TypedExpression,
+    args: &Vec<ExprId>,
     func_ty: &TyId,
 ) -> CompileResult<Value> {
-    let (mut params_type, mut ret_ty, va_arg) = match state.tcx.get(*func_ty) {
+    let (mut params_type, mut ret_ty, va_arg) = match state.tcx().get(*func_ty) {
         Ty::Function {
             params_type,
             ret_type,
@@ -200,15 +204,19 @@ pub fn compile_call(
         _ => unreachable!(),
     };
 
-    if let TypedExpression::FieldAccess(obj, field, _) = &**func
-        && let Ty::Struct { name, fields, .. } = state.tcx.get(obj.get_type()).clone()
+    if let TypedExpression::FieldAccess(_, obj, field, _) = func
+        && let Ty::Struct { name, fields, .. } = state
+            .typed_module
+            .tcx_ref()
+            .get(state.get_expr_ref(*obj).get_type())
+            .clone()
         && let Some(Ty::Function {
             params_type,
             ret_type,
             ..
         }) = fields
             .get(&field.value)
-            .and_then(|ty| Some(state.tcx.get(*ty)))
+            .and_then(|ty| Some(state.tcx().get(*ty)))
             .cloned()
     {
         return compile_call_method(
@@ -224,20 +232,20 @@ pub fn compile_call(
         );
     }
 
-    if let TypedExpression::Ident(Ident { value: name, .. }, _) = &**func
+    if let TypedExpression::Ident(Ident { value: name, .. }, _) = func
         && let Some(GenericInfo::Function { .. }) = state.generic_map.get(name.as_ref())
         && !state.compiled_generic_map.contains_key(name.as_ref())
     {
         return compile_call_generic(state, func, args, func_ty);
     }
 
-    let mut func_id = if let TypedExpression::Ident(ident, _) = &**func {
+    let mut func_id = if let TypedExpression::Ident(ident, _) = func {
         state.function_map.get(&ident.value.to_string()).copied()
     } else {
         None
     };
 
-    if let TypedExpression::Ident(Ident { value: name, .. }, _) = &**func
+    if let TypedExpression::Ident(Ident { value: name, .. }, _) = func
         && let Some(GenericInfo::Function { .. }) = state.generic_map.get(name.as_ref())
         && state.compiled_generic_map.contains_key(name.as_ref())
         && let Some(CompiledGenericInfo::Function {
@@ -263,13 +271,17 @@ pub fn compile_call(
 
     if va_arg {
         for arg in args {
-            let arg_val = Compiler::compile_expr(state, arg)?;
+            let arg = state.get_expr_ref(*arg).clone();
+
+            let arg_val = Compiler::compile_expr(state, &arg)?;
             arg_values.push(arg_val);
         }
     } else {
         for (arg, arg_ty) in args.iter().zip(params_type.iter()) {
-            let v = Compiler::compile_expr(state, arg)?;
-            let arg_ty = state.tcx.get(*arg_ty).clone();
+            let arg = state.get_expr_ref(*arg).clone();
+
+            let v = Compiler::compile_expr(state, &arg)?;
+            let arg_ty = state.tcx().get(*arg_ty).clone();
             state.retain_if_needed(v, &arg_ty);
             arg_values.push(v);
         }
@@ -295,21 +307,23 @@ pub fn compile_call(
 
     if va_arg {
         for arg in args {
+            let arg = state.get_expr_ref(*arg).clone();
+
             sig.params
                 .push(AbiParam::new(convert_type_to_cranelift_type(
-                    state.tcx.get(arg.get_type()),
+                    state.tcx().get(arg.get_type()),
                 )));
         }
     } else {
         for param_ty in &params_type {
             sig.params
                 .push(AbiParam::new(convert_type_to_cranelift_type(
-                    state.tcx.get(*param_ty),
+                    state.tcx().get(*param_ty),
                 )));
         }
     }
 
-    let ret_ty = state.tcx.get(ret_ty);
+    let ret_ty = state.tcx().get(ret_ty);
 
     if *ret_ty != Ty::Unit {
         sig.returns
@@ -333,7 +347,7 @@ pub fn compile_call(
     };
 
     for (val, ty) in arg_values.iter().zip(params_type.iter()) {
-        let ty = state.tcx.get(*ty).clone();
+        let ty = state.tcx().get(*ty).clone();
         state.release_if_needed(*val, &ty);
     }
 

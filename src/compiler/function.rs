@@ -56,7 +56,7 @@ pub fn compile_function(
     params: &Vec<(Arc<str>, TyId)>,
     ret_ty: TyId,
 
-    block_ast: &Box<TypedExpression>,
+    block_ast: &TypedExpression,
     func_name: &str,
 ) -> CompileResult<Value> {
     let func_id = state.function_map.get(func_name).cloned().map_or_else(
@@ -121,7 +121,7 @@ pub fn compile_function(
     // 10. 声明参数变量
     for (i, (param_name, tyid)) in params.iter().enumerate() {
         let symbol = func_symbol_table.borrow_mut().define(&param_name);
-        let cranelift_ty = convert_type_to_cranelift_type(state.tcx.get(*tyid));
+        let cranelift_ty = convert_type_to_cranelift_type(state.tcx().get(*tyid));
 
         func_builder.declare_var(Variable::from_u32(symbol.var_index as u32), cranelift_ty);
 
@@ -129,14 +129,14 @@ pub fn compile_function(
         func_builder.def_var(Variable::from_u32(symbol.var_index as u32), param_value);
     }
 
-    let ret_ty = state.tcx.get(ret_ty).clone();
+    let ret_ty = state.tcx().get(ret_ty).clone();
 
     // 11. 编译函数体
     let mut func_state = FunctionState {
         builder: func_builder,
         module: state.module,
         table: func_symbol_table,
-        tcx: state.tcx,
+        typed_module: state.typed_module,
         function_map: state.function_map,
         data_map: state.data_map,
         generic_map: state.generic_map,
