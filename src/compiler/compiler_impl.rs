@@ -229,7 +229,9 @@ impl<'a> Compiler<'a> {
     pub fn is_top_level_stmt(state: &GlobalState, stmt: &TypedStatement) -> bool {
         if matches!(
             stmt,
-            TypedStatement::Const { .. } | TypedStatement::Struct { .. }
+            TypedStatement::Const { .. }
+                | TypedStatement::Struct { .. }
+                | TypedStatement::Extern { .. }
         ) {
             return true;
         } else if let TypedStatement::ExpressionStatement(_, id, _) = stmt {
@@ -574,6 +576,60 @@ impl<'a> Compiler<'a> {
                 Ok(())
             }
 
+            TypedStatement::Extern {
+                abi,
+                extern_func_name,
+                alias,
+                ty,
+                ..
+            } => {
+                // 检查 abi (目前只支持c)
+                if abi.value.as_ref() != "C" {
+                    return Err(format!("unsupported abi: {}", abi.value));
+                }
+
+                let Ty::Function {
+                    params_type,
+                    ret_type,
+                    ..
+                } = state.tcx_ref().get(*ty)
+                else {
+                    return Err(format!("not a function: {ty}"));
+                };
+
+                let mut cranelift_params = params_type
+                    .iter()
+                    .map(|it| {
+                        AbiParam::new(convert_type_to_cranelift_type(state.tcx_ref().get(*it)))
+                    })
+                    .collect::<Vec<_>>();
+
+                // 构造签名
+                let mut extern_func_sig = Signature::new(CALL_CONV);
+
+                extern_func_sig.params.append(&mut cranelift_params);
+
+                extern_func_sig
+                    .returns
+                    .push(AbiParam::new(convert_type_to_cranelift_type(
+                        &state.tcx_ref().get(*ret_type),
+                    )));
+
+                let extern_func_id = state
+                    .module
+                    .declare_function(&extern_func_name.value, Linkage::Import, &extern_func_sig)
+                    .map_err(|e| format!("declare {extern_func_name} failed: {}", e))?;
+
+                // 放进 function_map，方便后面 call
+                state
+                    .function_map
+                    .insert(alias.value.to_string(), extern_func_id);
+
+                state.table.borrow_mut().define_func(&alias.value);
+
+                Ok(())
+            }
+
             _ => todo!("impl function 'compile_stmt'"),
         }
     }
@@ -763,7 +819,7 @@ impl<'a> Compiler<'a> {
                     .insert(alias.value.to_string(), extern_func_id);
 
                 // 登记进符号表后，立刻 declare
-                let func_symbol = state.table.borrow_mut().define(&alias.value);
+                let func_symbol = state.table.borrow_mut().define_func(&alias.value);
                 state.builder.declare_var(
                     Variable::from_u32(func_symbol.var_index as u32),
                     platform_width_to_int_type(), // 函数指针类型
@@ -922,6 +978,7 @@ impl<'a> Compiler<'a> {
 
             TypedExpression::Ident(it, ty) => {
                 let sym = state.table.borrow_mut().get(&it.value);
+
                 if let Some(var) = &sym
                     && var.scope == SymbolScope::Local
                 {
@@ -931,6 +988,16 @@ impl<'a> Compiler<'a> {
                 } else if let Some(var) = sym
                     && var.scope == SymbolScope::Global
                 {
+                    if let Some(&func_id) = state.function_map.get(&it.value.to_string()) {
+                        let func_ref = state
+                            .module
+                            .declare_func_in_func(func_id, &mut state.builder.func);
+                        return Ok(state
+                            .builder
+                            .ins()
+                            .func_addr(platform_width_to_int_type(), func_ref));
+                    }
+
                     // 获取 DataId
                     let data_id = state
                         .data_map
@@ -1378,6 +1445,7 @@ impl<'a> Compiler<'a> {
 
                 compile_infix(state, op.clone(), &left, &right)
             }
+
             TypedExpression::Block(_, it, _) => {
                 let mut ret_val = state.builder.ins().iconst(types::I64, 0);
 
@@ -1469,6 +1537,28 @@ impl<'a> Compiler<'a> {
                 state.builder.seal_block(merge_block);
 
                 Ok(state.builder.block_params(merge_block)[0])
+            }
+
+            TypedExpression::Prefix { op, right, ty, .. } => {
+                if op.as_ref() == "*" {
+                    // 1. 编译右侧表达式，得到指针的地址值
+                    let ptr_val = Self::compile_expr(state, &state.get_expr_ref(*right).clone())?;
+
+                    // 获取目标类型 (即指针指向的类型)
+                    // 注: 这里的 ty 应该是解引用后的类型（例如从 *i32 变成 i32）
+                    let target_ty = state.tcx_ref().get(*ty).clone();
+                    let cranelift_ty = convert_type_to_cranelift_type(&target_ty);
+
+                    // 3. 执行 load 操作
+                    return Ok(state.builder.ins().load(
+                        cranelift_ty, // 读取出来的数据类型
+                        MemFlags::new(), // 内存标记
+                        ptr_val, // 地址 Value
+                        0, // 偏移量（通常为 0）
+                    ))
+                }
+
+                todo!("todo op {op}")
             }
 
             _ => todo!("impl function 'compile_expr'"),
