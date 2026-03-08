@@ -2,63 +2,64 @@ extern "C" func printf(s: str, ...) -> i32;
 extern "C" func malloc(size: usize) -> *u8;
 extern "C" func free(ptr: *u8) -> u8;
 
-struct vec<T> {
-	ptr: *T
+struct Vec<T> {
+	ptr: *T,
 	size: usize
 }
 
-func vec_init<T> (size_: usize)-> vec<T>{
-	let o = new vec<T> {
-		ptr = *T(malloc(size_))
+func vec_init<T>(size_: usize) -> Vec<T> {
+	let o = new Vec {
+		ptr = malloc(size_) as *T
 		size = size_
 	};
+
 	o
 }
 
-func vec_free<T> (v: vec<T>)-> void{
-	if(v.size){
-		v.size=0;
+func vec_free<T>(v: Vec<T>) {
+	if v.size != 0usize {
+		v.size = 0usize;
 		free(v.ptr);
 	}
 }
 
-func vec_get<T> (v: vec<T>, p: u8)-> T{
-	*(v.ptr+p)
+func vec_get<T>(v: Vec<T>, p: u8)-> T {
+	*(v.ptr + p)
 }
 
-func vec_post<T> (v: vec<T>, p:u8, nv: T)-> void{
-	*(v.ptr+p)=nv;
+func vec_post<T>(v: Vec<T>, p:u8, nv: T) {
+	*(v.ptr + p) = nv;
 }
 
-func vec_ref<T> (v: vec<T>, p:u8)-> *T{
-	v.ptr+p
+func vec_ref<T>(v: Vec<T>, p:u8) -> *T {
+	v.ptr + p
 }
 
-func vec_size<T> (v: vec<T>) -> usize{
+func vec_size<T>(v: Vec<T>) -> usize {
 	v.size
 }
 
 //need `for`
-func vec_erase<T> (v: vec<T>, p:u8)-> vec<T>{
-	for(let post=p;post<v.size;post=post+1){
-		vec_post(v,post,vec_get(v,post+1));
+func vec_erase<T>(v: Vec<T>, p:u8) -> Vec<T> {
+	for(let post=p; post < v.size; post = post + 1){
+		vec_post(v,post, vec_get(v,post + 1));
 	}
-	v.size=v.size-1;
+	v.size = v.size - 1;
 	v
 }
 
-func vec_insert<T> (v: vec<T>, p:u8, nv: T)-> vec<T>{
-	let o = new vec<T> {
-		ptr=malloc(v.size+1)
-		size=v.size+1
+func vec_insert<T>(v: Vec<T>, p:u8, nv: T) -> Vec<T>{
+	let o = new Vec<T> {
+		ptr = malloc(v.size + 1)
+		size = v.size + 1
 	};
-	let postv=0;let posto=0;
-	for(;postv<v.size;postv=posto+1,posto=posto+1){
-		if(postv==p){
-			vec_post(o,posto,nv)
-			posto=posto+1;
+	let postv = 0; let posto = 0;
+	for(postv < v.size; postv = posto + 1, posto = posto + 1) {
+		if(postv == p){
+			vec_post(o, posto, nv)
+			posto = posto + 1;
 		}
-		vec_post(o,posto,vec_get(v,postv));
+		vec_post(o, posto, vec_get(v, postv));
 	}
 	vec_free(v);
 	o
