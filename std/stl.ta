@@ -63,6 +63,68 @@ func vec_insert<T> (v: vec<T>, p:u8, nv: T)-> vec<T>{
 	vec_free(v);
 	o
 }
+
+func vec_find<T> (v: vec<T>, content: T) -> *T {
+    let i: usize = 0;
+    for(; i < v.size; i = i + 1) {
+        let pos = u8(i);
+        let current_val = vec_get(v, pos);
+        if (current_val == content) {
+            vec_ref(v, pos)
+        }
+    }
+    vec_end(v)
+}
+
+func vec_swap<T> (v: vec<T>, i: u8, j: u8) -> void {
+    let temp = vec_get(v, i);
+    vec_post(v, i, vec_get(v, j));
+    vec_post(v, j, temp);
+}
+
+func _vec_partition<T> (v: vec<T>, low: usize, high: usize) -> usize {
+    let pivot_pos = u8(high);
+    let pivot_val = vec_get(v, pivot_pos);
+    let i: usize = low - 1;
+    let j: usize = low;
+    
+    for(; j < high; j = j + 1) {
+        let j_pos = u8(j);
+        if (vec_get(v, j_pos) <= pivot_val) {
+            i = i + 1;
+            vec_swap(v, u8(i), j_pos);
+        }
+    }
+    vec_swap(v, u8(i+1), pivot_pos);
+    return i + 1;
+}
+
+func _vec_quick_sort_recursive<T> (v: vec<T>, low: usize, high: usize) -> void {
+    if (low < high) {
+        let pivot_idx = partition(v, low, high);
+        if (pivot_idx > 0) {
+            _vec_quick_sort_recursive(v, low, pivot_idx - 1);
+        }
+        _vec_quick_sort_recursive(v, pivot_idx + 1, high);
+    }
+}
+
+func vec_sort<T> (v: vec<T>) -> void {
+    if (v.size <= 1) {
+        
+    }else{
+    	_vec_quick_sort_recursive(v, 0, v.size - 1);
+    }
+}
+
+func vec_begin<T> (v: vec<T>) -> *T {
+	v.ptr
+}
+
+func vec_end<T> (v: vec<T>) -> *T {
+	v.ptr+v.size
+}
+
 //usage:
 //let v=vec_init<u8>(5usize);
 //defer vec_free(v);
