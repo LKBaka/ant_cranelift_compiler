@@ -38,7 +38,7 @@ use crate::{
         get_platform_width,
         handler::{
             compile_build_struct::compile_build_struct, compile_call::compile_call,
-            compile_infix::compile_infix,
+            compile_cast::compile_cast, compile_infix::compile_infix,
         },
         imm::{int_value_to_imm, platform_width_to_int_type},
         table::{StructLayout, SymbolScope, SymbolTable, SymbolTy},
@@ -172,6 +172,7 @@ impl<'a> Compiler<'a> {
             Ty::Bool => Ok(1),
             Ty::Str => Ok(pointer_width),
             Ty::Function { .. } => Ok(pointer_width),
+            Ty::Ptr(_) => Ok(pointer_width),
             Ty::Struct { name, .. } => {
                 let SymbolTy::Struct(layout) =
                     state.get_table().borrow_mut().get(name).map_or_else(
@@ -208,6 +209,7 @@ impl<'a> Compiler<'a> {
         match ty {
             Ty::IntTy(it) => Ok(it.get_bytes_size() as u32),
             Ty::Bool => Ok(1),
+            Ty::Ptr(_) => Ok(pointer_width),
             Ty::Str => Ok(pointer_width),
             Ty::Function { .. } => Ok(pointer_width),
             Ty::Struct { name, .. } => {
@@ -1604,6 +1606,12 @@ impl<'a> Compiler<'a> {
                 }
 
                 todo!("todo op {op}")
+            }
+
+            TypedExpression::Cast { val, ty, .. } => {
+                let val_expr = state.get_expr_cloned(*val);
+                let val = Self::compile_expr(state, &val_expr)?;
+                compile_cast(state, val, val_expr.get_type(), *ty)
             }
 
             _ => todo!("impl function 'compile_expr'"),
