@@ -9,7 +9,7 @@ struct Vec<T> {
 
 func vec_init<T>(size_: usize) -> Vec<T> {
 	let o = new Vec {
-		ptr = malloc(size_),
+		ptr = malloc(size_ * sizeof T) as *T,
 		size = size_
 	};
 
@@ -19,7 +19,7 @@ func vec_init<T>(size_: usize) -> Vec<T> {
 func vec_free<T>(v: Vec<T>) {
 	if v.size != 0usize {
 		v.size = 0usize;
-		free(v.ptr);
+		free(v.ptr as *u8);
 	}
 }
 
@@ -54,7 +54,7 @@ func vec_erase<T>(v: Vec<T>, p:u8) -> Vec<T> {
 
 func vec_insert<T>(v: Vec<T>, p: u8, nv: T) -> Vec<T>{
 	let o = new Vec {
-		ptr = malloc(v.size + 1usize)
+		ptr = malloc((v.size + 1usize) * sizeof T)
 		size = v.size + 1usize
 	};
 
@@ -112,7 +112,7 @@ func _vec_partition<T> (v: Vec<T>, low: usize, high: usize) -> usize {
 
 func _vec_quick_sort_recursive<T> (v: Vec<T>, low: usize, high: usize) -> void {
     if (low < high) {
-        let pivot_idx = partition(v, low, high);
+        let pivot_idx = _vec_partition(v, low, high);
         if (pivot_idx > 0) {
             _vec_quick_sort_recursive(v, low, pivot_idx - 1);
         }
@@ -135,6 +135,95 @@ func vec_begin<T> (v: Vec<T>) -> *T {
 func vec_end<T> (v: Vec<T>) -> *T {
 	v.ptr+v.size
 }
+
+func vec_empty<T> (v: Vec<T>) -> bool {
+	v.size
+}
+
+func vec_resize<T> (v: Vec<T>, new_size: usize) -> Vec<T> {
+    if new_size == v.size {
+        v
+    }
+
+    if new_size == 0usize {
+        vec_free(v);
+        let empty_vec = new Vec {
+            ptr = 0 as *T,
+            size = 0usize
+        };
+        empty_vec
+    }
+
+    if new_size < v.size {
+        v.size = new_size;
+        v
+    }
+
+    let new_ptr = malloc(new_size * sizeof T) as *T;
+    
+    let i: usize = 0;
+    for (; i < v.size; i = i + 1) {
+        let pos = u8(i);
+        *(new_ptr + i) = vec_get(v, pos);
+    }
+
+    free(v.ptr as *u8);
+
+    v.ptr = new_ptr;
+    v.size = new_size;
+
+    v
+}
+
+
+func vec_push<T> (v: Vec<T>, nv: T) -> Vec<T> {
+	vec_insert(v, vec_size(v), nv)
+}
+
+func vec_pop<T> (v: Vec<T>) -> Vec<T> {
+	vec_erase(v, vec_size(v)-1)
+}
+
+func vec_data<T> (v: Vec<T>) -> *T {
+	v.ptr
+}
+
+func vec_build<T> (raw: *T, len: usize) -> Vec<T> {
+    // deep copy
+    if raw == 0 as *T || len == 0usize {
+        let empty_vec = new Vec {
+            ptr = 0 as *T,
+            size = 0usize
+        };
+        empty_vec
+    }
+
+    let new_vec = vec_init<T>(len);
+
+    let i: usize = 0;
+    for (; i < len; i = i + 1) {
+        let pos = u8(i);
+        let value = *(raw + i);
+        vec_post(new_vec, pos, value);
+    }
+
+    new_vec
+}
+
+func vec_copy<T> (ov: Vec<T>) -> Vec<T> {
+	//deep copy
+	vec_build(ov.ptr, ov.size)
+}
+
+func vec_build_ref<T> (raw: *T, len: usize) -> Vec<T> {
+	let result = new Vec {
+		ptr = raw
+		size = len
+	};
+	result
+}
+
+//func vec_move<T>
 
 //usage:
 //let v=vec_init<u8>(5usize);
