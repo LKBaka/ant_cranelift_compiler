@@ -267,6 +267,22 @@ impl SymbolTable {
         symbol
     }
 
+    pub fn insert_symbol_in_top(&mut self, name: &str, sym: Symbol) {
+        let mut top_table = self.outer.clone();
+
+        while let Some(top) = top_table.clone() {
+            top_table = top.borrow_mut().outer.clone()
+        }
+
+        if let Some(top) = top_table {
+            top.borrow_mut().def_count += 1;
+            top.borrow_mut().map.insert(name.into(), sym);
+        } else {
+            self.def_count += 1;
+            self.map.insert(name.into(), sym.clone());
+        }
+    }
+
     pub fn find(&self, def_index: usize) -> Option<Symbol> {
         let symbols = self
             .map

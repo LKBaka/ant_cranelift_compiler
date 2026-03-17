@@ -18,21 +18,6 @@ use crate::compiler::{
 };
 use crate::traits::NeedGc;
 
-pub fn mangle_func(name: &str, args: &[&Ty]) -> String {
-    if args.is_empty() {
-        return name.to_string();
-    }
-
-    let mut res = name.to_string();
-    res.push_str("__");
-
-    for arg in args {
-        res.push_str(&format!("_{}", arg));
-    }
-
-    res
-}
-
 pub fn make_signature(param_types: &[&Ty], ret_ty: &Ty) -> Signature {
     let mut signature = Signature::new(CALL_CONV);
 
@@ -157,7 +142,7 @@ pub fn compile_function(
     let result = Compiler::compile_expr(&mut func_state, block_ast)?;
 
     if !func_state.terminated {
-        let symbols = state.table.borrow().map.clone();
+        let symbols = func_state.table.borrow().map.clone();
 
         for (_, sym) in symbols {
             if sym.is_val && sym.symbol_ty.need_gc() {

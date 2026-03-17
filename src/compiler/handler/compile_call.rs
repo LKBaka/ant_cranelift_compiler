@@ -16,8 +16,8 @@ use crate::compiler::{
     compile_state_impl::PushGetGeneric,
     constants::CALL_CONV,
     convert_type::convert_type_to_cranelift_type,
-    function::{compile_function, make_signature, mangle_func},
-    generic::{CompiledGenericInfo, GenericInfo},
+    function::{compile_function, make_signature},
+    generic::{CompiledGenericInfo, GenericInfo, mangle_generic},
     imm::platform_width_to_int_type,
 };
 
@@ -125,7 +125,7 @@ fn compile_call_generic(
         .map(|it| state.typed_module.tcx_ref().get(*it))
         .collect::<Vec<&Ty>>();
 
-    let mangled_func_name = mangle_func(&name, &arg_types);
+    let mangled_func_name = mangle_generic(&name, &arg_types);
 
     let mut generic_param_to_real_types = IndexMap::new();
     

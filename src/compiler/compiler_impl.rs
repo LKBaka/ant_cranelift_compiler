@@ -37,8 +37,10 @@ use crate::{
         generic::GenericInfo,
         get_platform_width,
         handler::{
-            compile_build_struct::compile_build_struct, compile_call::compile_call,
-            compile_cast::compile_cast, compile_infix::compile_infix,
+            compile_build_struct::{compile_build_struct, instantiate_struct},
+            compile_call::compile_call,
+            compile_cast::compile_cast,
+            compile_infix::compile_infix,
         },
         imm::{int_value_to_imm, platform_width_to_int_type},
         table::{StructLayout, SymbolScope, SymbolTable, SymbolTy},
@@ -576,18 +578,11 @@ impl<'a> Compiler<'a> {
                         })
                         .collect();
 
-                    let generic_fields = fields
-                        .iter()
-                        .map(|(name, id)| (name, state.tcx_ref().get(*id)))
-                        .filter(|(_, it)| matches!(it, Ty::Generic(_, _)))
-                        .map(|(name, ty)| (name.clone(), ty.to_string().into()))
-                        .collect();
-
                     state.push_generic(
                         name.to_string(),
                         GenericInfo::Struct {
                             generic_params,
-                            generic_fields,
+                            fields: fields.clone(),
                         },
                     );
                 }
@@ -689,8 +684,15 @@ impl<'a> Compiler<'a> {
                     .iconst(convert_type_to_cranelift_type(&Ty::Unit), 0))
             }
 
-            TypedStatement::Block { statements: it, .. } => {
-                let mut ret_val = state.builder.ins().iconst(types::I64, 0);
+            TypedStatement::Block {
+                statements: it, ty, ..
+            } => {
+                let ty = state.resolve_concrete_ty(*ty, state.subst);
+
+                let mut ret_val = state
+                    .builder
+                    .ins()
+                    .iconst(convert_type_to_cranelift_type(&ty), 0);
 
                 for stmt in it {
                     let stmt = state.get_stmt_ref(*stmt).clone();
@@ -698,7 +700,11 @@ impl<'a> Compiler<'a> {
                     ret_val = Self::compile_stmt(state, &stmt)?;
                 }
 
-                Ok(ret_val)
+                if ty == Ty::Unit {
+                    Ok(state.builder.ins().iconst(convert_type_to_cranelift_type(&ty), 0))
+                } else {
+                    Ok(ret_val)
+                }
             }
 
             TypedStatement::While {
@@ -775,18 +781,11 @@ impl<'a> Compiler<'a> {
                         })
                         .collect();
 
-                    let generic_fields = fields
-                        .iter()
-                        .map(|(name, id)| (name, state.tcx_ref().get(*id)))
-                        .filter(|(_, it)| matches!(it, Ty::Generic(_, _)))
-                        .map(|(name, ty)| (name.clone(), ty.to_string().into()))
-                        .collect();
-
                     state.push_generic(
                         name.to_string(),
                         GenericInfo::Struct {
                             generic_params,
-                            generic_fields,
+                            fields: fields.clone(),
                         },
                     );
                 }
@@ -1128,11 +1127,25 @@ impl<'a> Compiler<'a> {
                     ));
                 };
 
+                let concrete_name = match &obj_ty {
+                    Ty::Struct { name, .. } => name.clone(), // 普通结构体，直接用原名
+                    Ty::AppliedGeneric(base_name, type_args) => {
+                        instantiate_struct(state, base_name, type_args)?
+                    }
+
+                    _ => {
+                        return Err(format!(
+                            "field access on `{}` type",
+                            display_ty(&obj_ty, state.tcx_ref())
+                        ));
+                    }
+                };
+
                 // 从符号表获取结构体布局
                 let SymbolTy::Struct(layout) = state
                     .table
                     .borrow_mut()
-                    .get(name)
+                    .get(&concrete_name)
                     .ok_or_else(|| format!("undefined struct: {}", name))?
                     .symbol_ty
                 else {
@@ -1237,11 +1250,25 @@ impl<'a> Compiler<'a> {
                         ));
                     };
 
+                    let concrete_name = match &obj_ty {
+                        Ty::Struct { name, .. } => name.clone(), // 普通结构体，直接用原名
+                        Ty::AppliedGeneric(base_name, type_args) => {
+                            instantiate_struct(state, base_name, type_args)?
+                        }
+
+                        _ => {
+                            return Err(format!(
+                                "field access on `{}` type",
+                                display_ty(&obj_ty, state.tcx_ref())
+                            ));
+                        }
+                    };
+
                     // 从符号表获取结构体布局
                     let sym = state
                         .table
                         .borrow_mut()
-                        .get(name)
+                        .get(&concrete_name)
                         .ok_or_else(|| format!("undefined struct: `{}`", name))?;
 
                     let SymbolTy::Struct(layout) = sym.symbol_ty else {
@@ -1571,8 +1598,13 @@ impl<'a> Compiler<'a> {
                 compile_infix(state, op.clone(), &left, &right)
             }
 
-            TypedExpression::Block(_, it, _) => {
-                let mut ret_val = state.builder.ins().iconst(types::I64, 0);
+            TypedExpression::Block(_, it, ty) => {
+                let ty = state.resolve_concrete_ty(*ty, state.subst);
+
+                let mut ret_val = state
+                    .builder
+                    .ins()
+                    .iconst(convert_type_to_cranelift_type(&ty), 0);
 
                 for stmt in it {
                     let stmt = state.get_stmt_ref(*stmt).clone();
@@ -1584,7 +1616,11 @@ impl<'a> Compiler<'a> {
                     }
                 }
 
-                Ok(ret_val)
+                if ty == Ty::Unit {
+                    Ok(state.builder.ins().iconst(convert_type_to_cranelift_type(&ty), 0))
+                } else {
+                    Ok(ret_val)
+                }
             }
 
             TypedExpression::BoolAnd { left, right, .. } => {

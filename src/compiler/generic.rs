@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use ant_type_checker::{ty::TyId, typed_ast::typed_expr::TypedExpression};
+use ant_type_checker::{ty::{Ty, TyId}, typed_ast::typed_expr::TypedExpression};
 use indexmap::IndexMap;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -9,8 +9,8 @@ pub enum GenericInfo {
         /// T, K, V ...
         generic_params: Vec<Arc<str>>,
 
-        /// generic_field, generic_param_name
-        generic_fields: IndexMap<Arc<str>, Arc<str>>
+        /// field, field_ty
+        fields: IndexMap<Arc<str>, TyId>
     },
 
     Function {
@@ -37,4 +37,19 @@ pub enum CompiledGenericInfo {
 
         new_ret_ty: TyId,
     }
+}
+
+pub fn mangle_generic(name: &str, args: &[&Ty]) -> String {
+    if args.is_empty() {
+        return name.to_string();
+    }
+
+    let mut res = name.to_string();
+    res.push_str("__");
+
+    for arg in args {
+        res.push_str(&format!("_{}", arg));
+    }
+
+    res
 }
