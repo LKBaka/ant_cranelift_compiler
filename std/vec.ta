@@ -1,0 +1,91 @@
+extern "C" func malloc(size: usize) -> *u8;
+extern "C" func free(ptr: *u8) -> u8;
+extern "C" func memcpy(dest: *u8, src: *u8, n: usize) -> u8;
+
+struct Vec<T> {
+    ptr: *T, // 指向第一个元素的指针
+    cap: usize, // 容量
+    len: usize // 长度
+}
+
+func vec_inita<T>(first: T) -> Vec<T> {
+    let v = new Vec {
+        ptr = malloc(sizeof T) as *T,
+        cap = 1usize,
+        len = 1usize
+    };
+
+    *v.ptr = first;
+
+    v
+}
+
+func vec_grow<T>(v: Vec<T>) {
+    let new_cap = if v.cap == 0usize {
+        2usize
+    } else {
+        v.cap * 2usize
+    };
+
+    let new_size = new_cap * (sizeof T);
+
+    let new_ptr = malloc(new_size) as *T;
+
+    // 如果旧指针不为空
+    // 拷贝的长度是旧长度 * 每个元素的大小
+    memcpy(new_ptr as *u8, v.ptr as *u8, v.len * sizeof T);
+
+    // 释放旧内存
+    free(v.ptr as *u8);
+
+    // 更新 Vec 结构体状态
+    v.ptr = new_ptr;
+    v.cap = new_cap;
+}
+
+func vec_push<T>(v: Vec<T>, item: T) {
+    if v.len == v.cap {
+        vec_grow(v);
+    }
+
+    // 计算写入位置: 起始指针 + 当前长度
+    let target_addr = v.ptr + v.len;
+    
+    // 写入元素
+    *target_addr = item;
+
+    // 长度加 1
+    v.len = v.len + 1usize;
+}
+
+func vec_get<T>(v: Vec<T>, i: usize) -> T {
+    *(v.ptr + i)
+}
+
+func vec_pop<T>(v: Vec<T>) -> T {
+    v.len = v.len - 1usize;
+    *(v.ptr + v.len) // 返回最后一个元素
+}
+
+func vec_free<T>(v: Vec<T>) {
+    if v.ptr as usize != 0usize {
+        free(v.ptr as *u8);
+        v.ptr = 0usize as *T;
+        v.len = 0usize;
+        v.cap = 0usize;
+    }
+}
+
+func main() -> i32 {
+    extern "C" func printf(s: str, ...) -> i32;
+
+    let v = vec_inita(42i32);
+    vec_push(v, 91i32);
+    vec_push(v, 78i32);
+
+    printf("0: %d\n", vec_get(v, 0usize));
+    printf("1: %d\n", vec_get(v, 1usize));
+    printf("2: %d\n", vec_get(v, 2usize));
+
+    0i32;
+}
