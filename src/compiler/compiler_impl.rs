@@ -623,12 +623,13 @@ impl<'a> Compiler<'a> {
 
                 extern_func_sig.params.append(&mut cranelift_params);
 
-                extern_func_sig
-                    .returns
-                    .push(AbiParam::new(convert_type_to_cranelift_type(
-                        &state.tcx_ref().get(*ret_type),
-                    )));
+                let ret_type = state.tcx_ref().get(*ret_type);
 
+                if *ret_type != Ty::Unit {
+                    extern_func_sig
+                        .returns
+                        .push(AbiParam::new(convert_type_to_cranelift_type(ret_type)));
+                }
                 let extern_func_id = state
                     .module
                     .declare_function(&extern_func_name.value, Linkage::Import, &extern_func_sig)
@@ -701,7 +702,10 @@ impl<'a> Compiler<'a> {
                 }
 
                 if ty == Ty::Unit {
-                    Ok(state.builder.ins().iconst(convert_type_to_cranelift_type(&ty), 0))
+                    Ok(state
+                        .builder
+                        .ins()
+                        .iconst(convert_type_to_cranelift_type(&ty), 0))
                 } else {
                     Ok(ret_val)
                 }
@@ -832,11 +836,13 @@ impl<'a> Compiler<'a> {
 
                 extern_func_sig.params.append(&mut cranelift_params);
 
-                extern_func_sig
-                    .returns
-                    .push(AbiParam::new(convert_type_to_cranelift_type(
-                        &state.resolve_concrete_ty(ret_type, state.subst),
-                    )));
+                let ret_type = state.resolve_concrete_ty(ret_type, state.subst);
+
+                if ret_type != Ty::Unit {
+                    extern_func_sig
+                        .returns
+                        .push(AbiParam::new(convert_type_to_cranelift_type(&ret_type)));
+                }
 
                 let extern_func_id = state
                     .module
@@ -1617,7 +1623,10 @@ impl<'a> Compiler<'a> {
                 }
 
                 if ty == Ty::Unit {
-                    Ok(state.builder.ins().iconst(convert_type_to_cranelift_type(&ty), 0))
+                    Ok(state
+                        .builder
+                        .ins()
+                        .iconst(convert_type_to_cranelift_type(&ty), 0))
                 } else {
                     Ok(ret_val)
                 }
