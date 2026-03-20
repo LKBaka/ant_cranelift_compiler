@@ -165,6 +165,7 @@ impl<'b, 'a> FunctionState<'a, 'b> {
                 params_type,
                 ret_type,
                 is_variadic,
+                generics,
             } => {
                 let concrete_params_type = params_type
                     .iter()
@@ -181,6 +182,7 @@ impl<'b, 'a> FunctionState<'a, 'b> {
                     params_type: concrete_params_type,
                     ret_type: concrete_ret_type,
                     is_variadic,
+                    generics,
                 }
             }
 

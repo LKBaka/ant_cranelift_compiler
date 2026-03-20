@@ -28,6 +28,7 @@ fn compile_call_method(
     func_ty: &TyId,
 
     original_func_ret_ty: &usize,
+    original_func_generics: &Vec<Arc<str>>,
 
     field: &Ident,
 
@@ -43,6 +44,7 @@ fn compile_call_method(
         params_type: params_type.clone(),
         ret_type: ret_type.clone(),
         is_variadic: false,
+        generics: original_func_generics.clone(),
     });
 
     let call_expr = TypedExpression::Call {
@@ -128,7 +130,7 @@ fn compile_call_generic(
     let mangled_func_name = mangle_generic(&name, &arg_types);
 
     let mut generic_param_to_real_types = IndexMap::new();
-    
+
     for ((_, generic_param_id), arg_tyid) in all_params.iter().zip(&arg_tyids) {
         let param_ty = state.tcx_ref().get(*generic_param_id).clone();
         Compiler::substitute(
@@ -138,7 +140,7 @@ fn compile_call_generic(
             &mut generic_param_to_real_types,
         );
     }
-    
+
     let def_ret_ty_obj = state.tcx_ref().get(ret_ty).clone();
     Compiler::substitute(
         state.tcx_ref(),
@@ -219,14 +221,17 @@ pub fn compile_call(
     args: &Vec<ExprId>,
     func_ty: &TyId,
 ) -> CompileResult<Value> {
-    let (mut params_type, mut ret_ty, va_arg) = match state.tcx().get(*func_ty) {
-        Ty::Function {
-            params_type,
-            ret_type,
-            is_variadic,
-        } => (params_type.clone(), *ret_type, *is_variadic),
-        _ => unreachable!(),
-    };
+    let (mut params_type, mut ret_ty, va_arg, generics) =
+        match state.tcx_ref().get(*func_ty).clone() {
+            Ty::Function {
+                params_type,
+                ret_type,
+                is_variadic,
+                generics,
+                ..
+            } => (params_type.clone(), ret_type, is_variadic, generics),
+            _ => unreachable!(),
+        };
 
     if let TypedExpression::FieldAccess(_, obj, field, _) = func
         && let Ty::Struct { name, fields, .. } = state
@@ -240,7 +245,7 @@ pub fn compile_call(
             ..
         }) = fields
             .get(&field.value)
-            .and_then(|ty| Some(state.tcx().get(*ty)))
+            .and_then(|ty| Some(state.tcx_ref().get(*ty)))
             .cloned()
     {
         return compile_call_method(
@@ -249,6 +254,7 @@ pub fn compile_call(
             args,
             func_ty,
             &ret_ty,
+            &generics,
             field,
             &params_type,
             &ret_type,

@@ -34,7 +34,7 @@ use crate::{
         constants::CALL_CONV,
         convert_type::convert_type_to_cranelift_type,
         function::{compile_function, make_signature},
-        generic::GenericInfo,
+        generic::{GenericInfo, mangle_generic},
         get_platform_width,
         handler::{
             compile_build_struct::{compile_build_struct, instantiate_struct},
@@ -172,9 +172,9 @@ impl<'a> Compiler<'a> {
         match ty {
             Ty::IntTy(it) => Ok(it.get_bytes_size() as u32),
             Ty::Bool => Ok(1),
-            Ty::Str => Ok(pointer_width),
-            Ty::Function { .. } => Ok(pointer_width),
-            Ty::Ptr(_) => Ok(pointer_width),
+            Ty::Str => Ok(pointer_width / 8),
+            Ty::Function { .. } => Ok(pointer_width / 8),
+            Ty::Ptr(_) => Ok(pointer_width / 8),
             Ty::Struct { name, .. } => {
                 let SymbolTy::Struct(layout) =
                     state.get_table().borrow_mut().get(name).map_or_else(
@@ -1735,6 +1735,103 @@ impl<'a> Compiler<'a> {
                 let val_expr = state.get_expr_cloned(*val);
                 let val = Self::compile_expr(state, &val_expr)?;
                 compile_cast(state, val, val_expr.get_type(), *ty)
+            }
+
+            TypedExpression::GenericInstance {
+                left,
+                ty: func_ty_id,
+                ..
+            } => {
+                let base_name = match state.get_expr_ref(*left) {
+                    TypedExpression::Ident(id, _) => id.value.as_ref(),
+                    _ => return Err(format!("Turbofish left side must be an identifier")),
+                };
+
+                let func_ty = state.tcx_ref().get(*func_ty_id).clone();
+                let (params_type, func_ret_type) = match &func_ty {
+                    Ty::Function {
+                        params_type,
+                        ret_type,
+                        ..
+                    } => (params_type, ret_type),
+                    _ => unreachable!(),
+                };
+
+                let arg_tys: Vec<_> = params_type
+                    .iter()
+                    .map(|id| state.tcx_ref().get(*id))
+                    .cloned()
+                    .collect();
+
+                let mut arg_type_refs = vec![];
+
+                for arg_ty in &arg_tys {
+                    arg_type_refs.push(arg_ty);
+                }
+
+                let mangled_name = mangle_generic(base_name, &arg_type_refs);
+
+                let func_id = if let Some(&id) = state.function_map.get(&mangled_name) {
+                    id
+                } else {
+                    let info = state.generic_map.get(base_name).cloned().ok_or_else(|| {
+                        format!("generic function `{base_name}` not in generic map")
+                    })?;
+
+                    let GenericInfo::Function {
+                        all_params,
+                        ret_ty,
+                        block,
+                        ..
+                    } = info
+                    else {
+                        return Err(format!("`{base_name}` is not a generic function"));
+                    };
+
+                    let mut generic_param_to_real_types = IndexMap::new();
+
+                    let temp_func_ty_id = state.tcx().alloc(Ty::Function {
+                        generics: vec![],
+                        params_type: all_params.iter().map(|(_, id)| *id).collect(),
+                        ret_type: ret_ty,
+                        is_variadic: false,
+                    });
+
+                    Compiler::substitute(
+                        state.tcx_ref(),
+                        state.tcx_ref().get(temp_func_ty_id),
+                        *func_ty_id,
+                        &mut generic_param_to_real_types,
+                    );
+
+                    let signature = make_signature(&arg_type_refs, state.tcx_ref().get(ret_ty));
+
+                    let func_id = state
+                        .module
+                        .declare_function(&mangled_name, Linkage::Export, &signature)
+                        .map_err(|e| e.to_string())?;
+                    state.function_map.insert(mangled_name.clone(), func_id);
+
+                    compile_function(
+                        state,
+                        signature,
+                        &all_params.iter().map(|(n, id)| (n.clone(), *id)).collect(), // 这里可能需要根据 Subst 转换后的 ID
+                        *func_ret_type,
+                        &block,
+                        &mangled_name,
+                        &generic_param_to_real_types,
+                    )?;
+
+                    func_id
+                };
+
+                let func_ref = state
+                    .module
+                    .declare_func_in_func(func_id, &mut state.builder.func);
+                Ok(state
+                    .builder
+                    .ins()
+                    .func_addr(platform_width_to_int_type(), func_ref))
             }
 
             _ => todo!("impl function 'compile_expr'"),
