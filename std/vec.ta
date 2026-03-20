@@ -1,6 +1,6 @@
 extern "C" func malloc(size: usize) -> *u8;
 extern "C" func free(ptr: *u8) -> u8;
-extern "C" func memcpy(dest: *u8, src: *u8, n: usize) -> u8;
+extern "C" func memcpy(dest: *u8, src: *u8, n: usize);
 
 struct Vec<T> {
     ptr: *T, // 指向第一个元素的指针
