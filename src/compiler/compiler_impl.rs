@@ -9,7 +9,7 @@ use std::{
 };
 
 use ant_ast::expr::FloatValue;
-use bigdecimal::ToPrimitive;
+use bigdecimal::{BigDecimal, ToPrimitive};
 use cranelift::prelude::{AbiParam, InstBuilder, IntCC, MemFlags, Signature, Value, types};
 use cranelift_codegen::{
     ir::{Function, UserFuncName},
@@ -1002,25 +1002,25 @@ impl<'a> Compiler<'a> {
                 use bigdecimal::ToPrimitive;
 
                 // 根据目标类型检查范围
-                let (min, max) = match ty {
-                    Ty::IntTy(IntTy::I8) => (i8::MIN as i64, i8::MAX as i64),
-                    Ty::IntTy(IntTy::I16) => (i16::MIN as i64, i16::MAX as i64),
-                    Ty::IntTy(IntTy::I32) => (i32::MIN as i64, i32::MAX as i64),
-                    Ty::IntTy(IntTy::I64) => (i64::MIN, i64::MAX),
-                    Ty::IntTy(IntTy::U8) => (0, u8::MAX as i64),
-                    Ty::IntTy(IntTy::U16) => (0, u16::MAX as i64),
-                    Ty::IntTy(IntTy::U32) => (0, u32::MAX as i64),
-                    Ty::IntTy(IntTy::U64) => (0, u64::MAX as i64),
-                    Ty::IntTy(IntTy::ISize) => (0, isize::MAX as i64),
-                    Ty::IntTy(IntTy::USize) => (0, usize::MAX as i64),
-                    _ => (i64::MIN, i64::MAX),
+                let (min, max): (BigDecimal, BigDecimal) = match ty {
+                    Ty::IntTy(IntTy::I8) => (i8::MIN.into(), i8::MAX.into()),
+                    Ty::IntTy(IntTy::I16) => (i16::MIN.into(), i16::MAX.into()),
+                    Ty::IntTy(IntTy::I32) => (i32::MIN.into(), i32::MAX.into()),
+                    Ty::IntTy(IntTy::I64) => (i64::MIN.into(), i64::MAX.into()),
+                    Ty::IntTy(IntTy::ISize) => ((isize::MIN as i128).into(), (isize::MAX as i128).into()),
+                    Ty::IntTy(IntTy::U8) => (0.into(), u8::MAX.into()),
+                    Ty::IntTy(IntTy::U16) => (0.into(), u16::MAX.into()),
+                    Ty::IntTy(IntTy::U32) => (0.into(), u32::MAX.into()),
+                    Ty::IntTy(IntTy::U64) => (0.into(), u64::MAX.into()),
+                    Ty::IntTy(IntTy::USize) => (0.into(), (usize::MAX as u128).into()),
+                    _ => (i64::MIN.into(), i64::MAX.into()),
                 };
 
-                let val = value.to_i64().ok_or_else(|| format!("integer overflow"))?;
-
-                if val < min || val > max {
-                    return Err(format!("integer overflow"));
+                if *value < min || *value > max {
+                    return Err(format!("integer `{value}` overflow, min {min} max {max}"));
                 }
+                
+                let val = value.to_i64().ok_or_else(|| format!("invalid integer `{value}`"))?;
 
                 state
                     .builder
