@@ -69,6 +69,7 @@ name = "antc"
 version = "0.1.0"
 dependencies = [
  "ast",
+ "bigdecimal",
  "cc",
  "clap",
  "cranelift",
@@ -101,7 +102,7 @@ checksum = "c3d036a3c4ab069c7b410a2ce876bd74808d2d0888a82667669f8e783a898bf1"
 [[package]]
 name = "ast"
 version = "0.1.0"
-source = "git+https://github.com/ant-pl/TypedAnt.git#d4c34e687cec00277586b457e0d45014d538672f"
+source = "git+https://github.com/ant-pl/TypedAnt.git#1f614f5e1d7957a6410e926b80beeede8c584137"
 dependencies = [
  "bigdecimal",
  "indexmap",
@@ -495,7 +496,7 @@ checksum = "09edd9e8b54e49e587e4f6295a7d29c3ea94d469cb40ab8ca70b288248a81db2"
 [[package]]
 name = "lexer"
 version = "0.1.0"
-source = "git+https://github.com/ant-pl/TypedAnt.git#d4c34e687cec00277586b457e0d45014d538672f"
+source = "git+https://github.com/ant-pl/TypedAnt.git#1f614f5e1d7957a6410e926b80beeede8c584137"
 dependencies = [
  "colored",
  "token",
@@ -610,9 +611,10 @@ checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 [[package]]
 name = "parser"
 version = "0.1.0"
-source = "git+https://github.com/ant-pl/TypedAnt.git#d4c34e687cec00277586b457e0d45014d538672f"
+source = "git+https://github.com/ant-pl/TypedAnt.git#1f614f5e1d7957a6410e926b80beeede8c584137"
 dependencies = [
  "ast",
+ "bigdecimal",
  "colored",
  "indexmap",
  "num_enum",
@@ -861,7 +863,7 @@ dependencies = [
 [[package]]
 name = "token"
 version = "0.1.0"
-source = "git+https://github.com/ant-pl/TypedAnt.git#d4c34e687cec00277586b457e0d45014d538672f"
+source = "git+https://github.com/ant-pl/TypedAnt.git#1f614f5e1d7957a6410e926b80beeede8c584137"
 dependencies = [
  "phf",
 ]
@@ -899,7 +901,7 @@ dependencies = [
 [[package]]
 name = "type_checker"
 version = "0.1.0"
-source = "git+https://github.com/ant-pl/TypedAnt.git#d4c34e687cec00277586b457e0d45014d538672f"
+source = "git+https://github.com/ant-pl/TypedAnt.git#1f614f5e1d7957a6410e926b80beeede8c584137"
 dependencies = [
  "ast",
  "bigdecimal",
@@ -935,7 +937,7 @@ checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
 [[package]]
 name = "utils"
 version = "0.1.0"
-source = "git+https://github.com/ant-pl/TypedAnt.git#d4c34e687cec00277586b457e0d45014d538672f"
+source = "git+https://github.com/ant-pl/TypedAnt.git#1f614f5e1d7957a6410e926b80beeede8c584137"
 
 [[package]]
 name = "version_check"
