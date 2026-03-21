@@ -314,7 +314,11 @@ pub fn compile_call(
                 arg_val = state
                     .builder
                     .ins()
-                    .bitcast(types::I64, MemFlags::new(), arg_val);
+                    .bitcast(if cl_ty == types::F64 {
+                        types::I64
+                    } else {
+                        types::I32
+                    }, MemFlags::new(), arg_val);
             }
 
             arg_values.push(arg_val);
@@ -355,10 +359,10 @@ pub fn compile_call(
             let cl_ty = convert_type_to_cranelift_type(state.tcx().get(arg.get_type()));
 
             sig.params.push(AbiParam::new(
-                if (cl_ty == types::F64 && cl_ty == types::F32)
-                    && CALL_CONV == CallConv::WindowsFastcall
-                {
+                if cl_ty == types::F64 && CALL_CONV == CallConv::WindowsFastcall {
                     types::I64
+                } else if cl_ty == types::F32 && CALL_CONV == CallConv::WindowsFastcall {
+                    types::I32
                 } else {
                     cl_ty
                 },
