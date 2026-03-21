@@ -1,0 +1,9 @@
+func main() -> i32 {
+    let f = 1111.0 as f64;
+
+    extern "C" func printf(s: str, ...) -> i32;
+
+    printf("%f\n", f); 
+
+    0
+}
