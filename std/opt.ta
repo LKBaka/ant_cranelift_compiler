@@ -1,0 +1,75 @@
+struct Option<T1, T2> {
+    raw1: T1 ,
+    raw2: T2 ,
+    flag: bool
+}
+
+struct Result<T> {
+    raw1: T ,
+    flag: bool
+}
+
+func unbox<T1, T2> (val: *T1, opt: T2) -> bool {
+    if opt.flag {
+        *val = opt.raw1;
+    }
+    opt.flag
+}
+
+func option<T1, T2> (opt: Option<T1, T2>) -> T2 {
+    if opt.flag {
+        panic();
+    }
+    opt.raw2
+}
+
+func box<T> (val: T) -> Result<T> {
+    let ret = new Result {
+        raw1 = val
+        flag = true
+    }
+    ret
+}
+
+func opt1<T1, T2> (val: T1) -> Option<T1, T2> {
+    let ret = new Option {
+        raw1 = val
+        flag = true
+    }
+    ret
+}
+
+func opt2<T1, T2> (val: T2) -> Option<T1, T2> {
+    let ret = new Option {
+        raw2 = val
+        flag = false
+    }
+    ret
+}
+
+func null<T> () -> Result<T> {
+    let ret = new Result {
+        flag = false
+    }
+    ret
+}
+//usage:
+/*
+
+// res: Result<*u8>
+let val = 0u8 as *u8;
+if unbox(&val, res) {
+    printf("%d", *val);
+} else {
+    printf("none");
+}
+
+// res: Option<u8, i32>
+let val = 0u8;
+if unbox(&val, res) {
+    printf("%c", val);
+} else {
+    printf("%d", option(res));
+}
+
+*/

@@ -1,0 +1,155 @@
+const PI: f64 = 3.141592653589793;
+const PI_HALF: f64 = 1.5707963267948966;
+const TAU: f64 = 6.283185307179586;
+const DEG2RAD: f64 = 0.017453292519943295;
+const RAD2DEG: f64 = 57.29577951308232;
+
+func abs<T> (x: T) -> T {
+	if(x < 0) -x
+	x
+}
+
+func max<T> (a: T, b: T) -> T {
+	if(a > b) a
+	b
+}
+
+func min<T> (a: T, b: T) -> T {
+	if(a < b) a
+	b
+}
+
+func clamp<T> (x: T, min: T, max: T) -> T {
+	min(max(x, min), max)
+}
+
+func sign<T> (x: T) -> i32 {
+	if(x > 0) 1
+	if(x < 0) -1
+	0
+}
+
+func deg2rad(deg: f64) -> f64 {
+	deg * DEG2RAD
+}
+func rad2deg(rad: f64) -> f64 {
+	rad * RAD2DEG
+}
+
+func sin_fast(x: f64) -> f64 {
+	let x2 = x * x;
+	let x3 = x * x2;
+	let x5 = x3 * x2;
+	let x7 = x5 * x2;
+	return x - (x3/6.0) + (x5/120.0) - (x7/5040.0);
+}
+
+func cos_fast(x: f64) -> f64 {
+	sin_fast(x + PI_HALF)
+}
+
+func tan_fast(x: f64) -> f64 {
+	sin_fast(x) / cos_fast(x)
+}
+
+func pow_fast(base: f64, exp: u8) -> f64 {
+	let res: f64 = 1.0;
+	for(let i=0u8; i<exp; i=i+1){
+		res = res * base;
+	}
+	res
+}
+
+func sqrt_fast(x: f64) -> f64 {
+	if(x <= 0) return 0.0;
+	let res = x / 2.0;
+	res = (res + x / res) / 2.0;
+	res
+}
+
+func sin(x: f64) -> f64 {
+	let t = x - TAU * ((x + PI) / TAU);
+	let t2 = t*t;
+	let t3 = t*t2;
+	let t5 = t3*t2;
+	let t7 = t5*t2;
+	let t9 = t7*t2;
+	let t11 = t9*t2;
+	return t 
+		- (t3/6.0) 
+		+ (t5/120.0) 
+		- (t7/5040.0) 
+		+ (t9/362880.0)
+		- (t11/39916800.0);
+}
+
+func cos(x: f64) -> f64 {
+	sin(x + PI_HALF)
+}
+
+func tan(x: f64) -> f64 {
+	sin(x) / cos(x)
+}
+
+func sqrt(x: f64) -> f64 {
+	if(x <= 0) return 0.0;
+	let res = x / 2.0;
+	res = (res + x / res) / 2.0;
+	res = (res + x / res) / 2.0;
+	res = (res + x / res) / 2.0;
+	res
+}
+
+func pow(base: f64, exp: f64) -> f64 {
+	if(base == 0) return 0.0;
+	if(exp == 0) return 1.0;
+	let log_val = ln(base);
+	return exp(log_val * exp);
+}
+
+func exp(x: f64) -> f64 {
+	let sum: f64 = 1.0;
+	let term: f64 = 1.0;
+	for(let i=1u8; i<20u8; i=i+1){
+		term = term * x / i;
+		sum = sum + term;
+	}
+	sum
+}
+
+func ln(x: f64) -> f64 {
+	if(x <= 0) return 0.0;
+	let sum: f64 = 0.0;
+	let y = (x - 1) / (x + 1);
+	let y2 = y*y;
+	let term: f64 = y;
+	for(let i=1u8; i<20u8; i=i+2){
+		sum = sum + term / i;
+		term = term * y2;
+	}
+	2.0 * sum
+}
+
+func vec_dot(v: vec<f32>) -> f32 {
+	let sum: f32 = 0.0;
+	for(let i=0u8; i<v.size; i=i+1){
+		sum = sum + vec_get(v,i) * vec_get(v,i);
+	}
+	sum
+}
+
+func vec_normalize_fast(v: vec<f32>){
+	let len = sqrt_fast(vec_dot(v));
+	if(len < 0.0001) v
+	for(let i=0u8; i<v.size; i=i+1){
+		vec_post(v,i, vec_get(v,i)/len);
+	}
+}
+
+func vec_normalize(v: vec<f32>){
+	let len = sqrt(vec_dot(v));
+	if(len < 0.0001) v
+	for(let i=0u8; i<v.size; i=i+1){
+		vec_post(v,i, vec_get(v,i)/len);
+	}
+}
