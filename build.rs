@@ -23,6 +23,23 @@ fn main() {
 
     // 监控 include 变化，重新执行 build.rs
     println!("cargo:rerun-if-changed=include");
+
+    let target_std_dir = Path::new(&target_dir)
+        .join(&profile)
+        .join("std");
+
+    let project_std_dir = Path::new("std");
+
+    // 删除已存在的目标目录（保证干净）
+    if target_std_dir.exists() {
+        fs::remove_dir_all(&target_std_dir).unwrap();
+    }
+
+    // 递归复制整个 std 文件夹
+    copy_dir_all(project_std_dir, &target_std_dir).unwrap();
+
+    // 监控 std 变化，重新执行 build.rs
+    println!("cargo:rerun-if-changed=std");
 }
 
 // 递归复制目录和文件
