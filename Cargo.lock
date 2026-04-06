@@ -67,7 +67,7 @@ dependencies = [
 [[package]]
 name = "ant_crate_def"
 version = "0.1.0"
-source = "git+https://github.com/ant-pl/TypedAnt.git#76c823a27f5bdfa2e3e120880f6de9dbe1d21f05"
+source = "git+https://github.com/ant-pl/TypedAnt.git#060c64bf47a5c6dcf9a2bedff0ffba7638df0288"
 dependencies = [
  "ast",
  "id",
@@ -121,7 +121,7 @@ checksum = "c3d036a3c4ab069c7b410a2ce876bd74808d2d0888a82667669f8e783a898bf1"
 [[package]]
 name = "ast"
 version = "0.1.0"
-source = "git+https://github.com/ant-pl/TypedAnt.git#76c823a27f5bdfa2e3e120880f6de9dbe1d21f05"
+source = "git+https://github.com/ant-pl/TypedAnt.git#060c64bf47a5c6dcf9a2bedff0ffba7638df0288"
 dependencies = [
  "bigdecimal",
  "indexmap",
@@ -479,7 +479,7 @@ checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 [[package]]
 name = "id"
 version = "0.1.0"
-source = "git+https://github.com/ant-pl/TypedAnt.git#76c823a27f5bdfa2e3e120880f6de9dbe1d21f05"
+source = "git+https://github.com/ant-pl/TypedAnt.git#060c64bf47a5c6dcf9a2bedff0ffba7638df0288"
 
 [[package]]
 name = "id-arena"
@@ -520,7 +520,7 @@ checksum = "09edd9e8b54e49e587e4f6295a7d29c3ea94d469cb40ab8ca70b288248a81db2"
 [[package]]
 name = "lexer"
 version = "0.1.0"
-source = "git+https://github.com/ant-pl/TypedAnt.git#76c823a27f5bdfa2e3e120880f6de9dbe1d21f05"
+source = "git+https://github.com/ant-pl/TypedAnt.git#060c64bf47a5c6dcf9a2bedff0ffba7638df0288"
 dependencies = [
  "colored",
  "token",
@@ -561,7 +561,7 @@ checksum = "f8ca58f447f06ed17d5fc4043ce1b10dd205e060fb3ce5b979b8ed8e59ff3f79"
 [[package]]
 name = "name_resolver"
 version = "0.1.0"
-source = "git+https://github.com/ant-pl/TypedAnt.git#76c823a27f5bdfa2e3e120880f6de9dbe1d21f05"
+source = "git+https://github.com/ant-pl/TypedAnt.git#060c64bf47a5c6dcf9a2bedff0ffba7638df0288"
 dependencies = [
  "ant_crate_def",
  "ast",
@@ -652,7 +652,7 @@ checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 [[package]]
 name = "parser"
 version = "0.1.0"
-source = "git+https://github.com/ant-pl/TypedAnt.git#76c823a27f5bdfa2e3e120880f6de9dbe1d21f05"
+source = "git+https://github.com/ant-pl/TypedAnt.git#060c64bf47a5c6dcf9a2bedff0ffba7638df0288"
 dependencies = [
  "ast",
  "bigdecimal",
@@ -904,7 +904,7 @@ dependencies = [
 [[package]]
 name = "token"
 version = "0.1.0"
-source = "git+https://github.com/ant-pl/TypedAnt.git#76c823a27f5bdfa2e3e120880f6de9dbe1d21f05"
+source = "git+https://github.com/ant-pl/TypedAnt.git#060c64bf47a5c6dcf9a2bedff0ffba7638df0288"
 dependencies = [
  "phf",
 ]
@@ -942,7 +942,7 @@ dependencies = [
 [[package]]
 name = "ty"
 version = "0.1.0"
-source = "git+https://github.com/ant-pl/TypedAnt.git#76c823a27f5bdfa2e3e120880f6de9dbe1d21f05"
+source = "git+https://github.com/ant-pl/TypedAnt.git#060c64bf47a5c6dcf9a2bedff0ffba7638df0288"
 dependencies = [
  "ast",
  "indexmap",
@@ -951,7 +951,7 @@ dependencies = [
 [[package]]
 name = "type_checker"
 version = "0.1.0"
-source = "git+https://github.com/ant-pl/TypedAnt.git#76c823a27f5bdfa2e3e120880f6de9dbe1d21f05"
+source = "git+https://github.com/ant-pl/TypedAnt.git#060c64bf47a5c6dcf9a2bedff0ffba7638df0288"
 dependencies = [
  "ant_crate_def",
  "ast",
@@ -969,7 +969,7 @@ dependencies = [
 [[package]]
 name = "typed_ast"
 version = "0.1.0"
-source = "git+https://github.com/ant-pl/TypedAnt.git#76c823a27f5bdfa2e3e120880f6de9dbe1d21f05"
+source = "git+https://github.com/ant-pl/TypedAnt.git#060c64bf47a5c6dcf9a2bedff0ffba7638df0288"
 dependencies = [
  "ast",
  "bigdecimal",
@@ -982,7 +982,7 @@ dependencies = [
 [[package]]
 name = "typed_module"
 version = "0.1.0"
-source = "git+https://github.com/ant-pl/TypedAnt.git#76c823a27f5bdfa2e3e120880f6de9dbe1d21f05"
+source = "git+https://github.com/ant-pl/TypedAnt.git#060c64bf47a5c6dcf9a2bedff0ffba7638df0288"
 dependencies = [
  "ast",
  "id",
@@ -1018,7 +1018,7 @@ checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
 [[package]]
 name = "utils"
 version = "0.1.0"
-source = "git+https://github.com/ant-pl/TypedAnt.git#76c823a27f5bdfa2e3e120880f6de9dbe1d21f05"
+source = "git+https://github.com/ant-pl/TypedAnt.git#060c64bf47a5c6dcf9a2bedff0ffba7638df0288"
 
 [[package]]
 name = "version_check"
