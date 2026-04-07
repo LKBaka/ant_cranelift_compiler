@@ -7,6 +7,7 @@ use std::{cell::RefCell, fs, path::PathBuf, rc::Rc, sync::Arc};
 
 use crate::compiler::{Compiler, compile_to_executable, create_target_isa, table::SymbolTable};
 
+use ant_cranelift_compiler::args::read_arg;
 use ant_id::ModuleId;
 use ant_lexer::Lexer;
 use ant_name_resolver::NameResolver;
@@ -55,7 +56,15 @@ fn compile(arg: Args) {
         }
     };
 
-    let mut name_resolver = NameResolver::new(ModuleId(0), file_arc.clone());
+    let mut name_resolver = if let Some(arg) = read_arg() {
+        NameResolver::new_with_search_roots(
+            ModuleId(0),
+            file_arc.clone(),
+            arg.extern_crates.iter().map(|it| PathBuf::from(it)).collect(),
+        )
+    } else {
+        NameResolver::new(ModuleId(0), file_arc.clone())
+    };
     if let Err(it) = name_resolver.resolve(program.clone()) {
         eprintln!("{it:#?}");
         eprintln!();
@@ -75,9 +84,9 @@ fn compile(arg: Args) {
             panic!("type checker error")
         }
     };
-    
+
     let constraints = checker.get_constraints().to_vec();
-    
+
     let mut infer_ctx = InferContext::new(&mut typed_module);
 
     let mut type_infer = TypeInfer::new(&mut infer_ctx, &name_resolver);

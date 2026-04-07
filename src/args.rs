@@ -31,6 +31,10 @@ pub struct Args {
     #[arg(short = 'l', long = "link")]
     pub link_with: Vec<String>,
 
+    /// 欲导入的包
+    #[arg(long = "extern-crate")]
+    pub extern_crates: Vec<String>,
+
     /// 是否保留临时.o
     #[arg(long = "keep-cache")]
     pub keep_cache: bool,
