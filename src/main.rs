@@ -7,7 +7,6 @@ use std::{cell::RefCell, fs, path::PathBuf, rc::Rc, sync::Arc};
 
 use crate::compiler::{Compiler, compile_to_executable, create_target_isa, table::SymbolTable};
 
-use ant_cranelift_compiler::args::read_arg;
 use ant_id::ModuleId;
 use ant_lexer::Lexer;
 use ant_name_resolver::NameResolver;
@@ -56,7 +55,7 @@ fn compile(arg: Args) {
         }
     };
 
-    let mut name_resolver = if let Some(arg) = read_arg() {
+    let mut name_resolver = if !arg.extern_crates.is_empty() {
         NameResolver::new_with_search_roots(
             ModuleId(0),
             file_arc.clone(),
