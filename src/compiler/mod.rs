@@ -183,8 +183,13 @@ pub fn compile_to_executable(
         let _target = "x86_64-pc-windows-gnu";
 
         #[cfg(target_os = "linux")]
-        let _target = "x86_64-unknown-linux-gnu";
+        let _target = if cfg!(target_arch = "aarch64") {
+            "aarch64-unknown-linux-gnu"
+        } else {
+            "x86_64-unknown-linux-gnu"
+        };
 
+        
         #[cfg(target_os = "macos")]
         let _target = if cfg!(target_arch = "aarch64") {
             "aarch64-apple-darwin"
