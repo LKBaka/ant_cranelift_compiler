@@ -3,7 +3,7 @@ mod compiler;
 mod traits;
 mod value;
 
-use std::{cell::RefCell, fs, path::PathBuf, rc::Rc, sync::Arc};
+use std::{cell::RefCell, collections::HashMap, fs, path::PathBuf, rc::Rc, sync::Arc};
 
 use crate::compiler::{Compiler, compile_to_executable, create_target_isa, table::SymbolTable};
 
@@ -56,10 +56,11 @@ fn compile(arg: Args) {
     };
 
     let mut name_resolver = if !arg.extern_crates.is_empty() {
-        NameResolver::new_with_search_roots(
+        NameResolver::new_with(
             ModuleId(0),
             file_arc.clone(),
             arg.extern_crates.iter().map(|it| PathBuf::from(it)).collect(),
+            HashMap::new()
         )
     } else {
         NameResolver::new(ModuleId(0), file_arc.clone())
