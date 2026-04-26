@@ -3,6 +3,8 @@ use cranelift::prelude::{InstBuilder, Value};
 use cranelift_codegen::ir::{self};
 use cranelift_frontend::FunctionBuilder;
 
+use crate::compiler::CompileState;
+
 pub trait NoRepeatPush<T> {
     fn push_no_repeat(&mut self, item: T);
 }
@@ -71,9 +73,14 @@ impl<'a> BuilderExtends for FunctionBuilder<'a> {
 
 pub trait LiteralExprToConst {
     type ConstType;
-    fn to_const(&self) -> Self::ConstType;
+    fn to_const<'a, 'b>(&self, state: &impl CompileState<'a, 'b>) -> Self::ConstType;
 }
 
 pub trait ToLeBytes {
     fn to_le_bytes(&self) -> Vec<u8>;
+}
+
+pub trait ToIntValue {
+    type IntValueType;
+    fn to_int_value(&self) -> Self::IntValueType;
 }

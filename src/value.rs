@@ -1,8 +1,12 @@
 use ant_ast::expr::{FloatValue, IntValue};
+use ant_ty::{IntTy, Ty};
 use ant_typed_ast::typed_expr::TypedExpression;
 use bigdecimal::ToPrimitive;
 
-use crate::traits::{LiteralExprToConst, ToLeBytes};
+use crate::{
+    compiler::CompileState,
+    traits::{LiteralExprToConst, ToLeBytes},
+};
 
 impl ToLeBytes for IntValue {
     fn to_le_bytes(&self) -> Vec<u8> {
@@ -20,7 +24,6 @@ impl ToLeBytes for IntValue {
         }
     }
 }
-
 
 #[derive(Clone, Debug)]
 pub enum ConstVal {
@@ -46,7 +49,7 @@ impl ToLeBytes for ConstVal {
 impl LiteralExprToConst for TypedExpression {
     type ConstType = Option<ConstVal>;
 
-    fn to_const(&self) -> Self::ConstType {
+    fn to_const<'a, 'b>(&self, state: &impl CompileState<'a, 'b>) -> Self::ConstType {
         if !self.is_literal() {
             return None;
         }
@@ -55,11 +58,36 @@ impl LiteralExprToConst for TypedExpression {
             Self::Int { value, .. } => Some(ConstVal::Int(*value)),
             Self::StrLiteral { value, .. } => Some(ConstVal::Str(value.to_string())),
             Self::Bool { value, .. } => Some(ConstVal::Bool(*value)),
+            Self::UnknownTypeInt { value, ty, .. } => {
+                let ty = state.get_typed_module_ref().tcx_ref().get(*ty).clone();
+
+                use bigdecimal::ToPrimitive;
+
+                let result = match ty {
+                    Ty::IntTy(IntTy::I8) => IntValue::I8(value.to_i8()?),
+                    Ty::IntTy(IntTy::I16) => IntValue::I16(value.to_i16()?),
+                    Ty::IntTy(IntTy::I32) => IntValue::I32(value.to_i32()?),
+                    Ty::IntTy(IntTy::I64) => IntValue::I64(value.to_i64()?),
+                    Ty::IntTy(IntTy::ISize) => {
+                        IntValue::ISize(isize::try_from(value.to_i64()?).ok()?)
+                    }
+                    Ty::IntTy(IntTy::U8) => IntValue::U8(value.to_u8()?),
+                    Ty::IntTy(IntTy::U16) => IntValue::U16(value.to_u16()?),
+                    Ty::IntTy(IntTy::U32) => IntValue::U32(value.to_u32()?),
+                    Ty::IntTy(IntTy::U64) => IntValue::U64(value.to_u64()?),
+                    Ty::IntTy(IntTy::USize) => {
+                        IntValue::USize(usize::try_from(value.to_u64()?).ok()?)
+                    }
+                    _ => return None,
+                };
+
+                Some(ConstVal::Int(result))
+            }
             Self::Float { value, .. } => Some(match value {
                 FloatValue::F32(it) => ConstVal::F32(it.to_f32().unwrap()),
                 FloatValue::F64(it) => ConstVal::F64(it.to_f64().unwrap()),
             }),
-            _ => None
+            _ => None,
         }
     }
 }

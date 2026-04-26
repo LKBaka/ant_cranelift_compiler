@@ -279,7 +279,7 @@ impl<'a> Compiler<'a> {
             TypedStatement::Const { name, value, .. } => {
                 let value = state.get_expr_ref(*value);
 
-                let const_val = value.to_const().map_or_else(
+                let const_val = value.to_const(state).map_or_else(
                     || Err(format!("the expression is not a constant")),
                     |it| Ok(it),
                 )?;
