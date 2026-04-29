@@ -200,11 +200,11 @@ pub fn compile_to_executable(
         };
 
         let target = if let Some(args) = &arg {
-            let usr_target = args.target_triple;
+            let usr_target = &args.target_triple;
             if usr_target.is_empty() {
                 normal_target.to_string()
             } else {
-        		usr_target
+        		usr_target.clone()
             }
         } else {
             normal_target.to_string()
@@ -272,7 +272,7 @@ pub fn compile_to_executable(
                 );
             }
 
-            for lib in it.link_with {
+            for lib in &it.link_with {
                 if lib.trim().is_empty() {
                     continue;
                 }
