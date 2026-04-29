@@ -180,10 +180,10 @@ pub fn compile_to_executable(
 
     if !compile_only {
         #[cfg(target_os = "windows")]
-        let _target = "x86_64-pc-windows-gnu";
+        let normal_target = "x86_64-pc-windows-gnu";
 
         #[cfg(target_os = "linux")]
-        let _target = if cfg!(target_arch = "aarch64") {
+        let normal_target = if cfg!(target_arch = "aarch64") {
             "aarch64-unknown-linux-gnu"
         } else {
             "x86_64-unknown-linux-gnu"
@@ -191,25 +191,21 @@ pub fn compile_to_executable(
 
         
         #[cfg(target_os = "macos")]
-        let _target = if cfg!(target_arch = "aarch64") {
+        let normal_target = if cfg!(target_arch = "aarch64") {
             "aarch64-apple-darwin"
         } else {
             "x86_64-apple-darwin"
         };
 
-        let target: String;
-        let _usr_target: String;
-
-        if let Some(args) = read_arg() {
-            _usr_target = args.target_triple;
-            if _usr_target.is_empty() {
-                target = _target.to_string();
-            }
-            else {
-                target = _usr_target;
+        let target = if let Some(args) = read_arg() {
+            let usr_target = args.target_triple;
+            if usr_target.is_empty() {
+                normal_target.to_string()
+            } else {
+        		usr_target
             }
         } else {
-            target = _target.to_string();
+            normal_target.to_string()
         }
 
         // let _target: String = read_arg().map(|args|args.target_triple).unwrap_or(_target.to_string());
@@ -301,11 +297,9 @@ pub fn compile_to_executable(
         {
             command.arg("-static").arg("-lmsvcrt");
         }
-
         
-
         // macOS: 不要 static / 不要 -lc（clang 自动处理）
-
+        
         command.status().expect("link failed");
 
         fs::remove_file(lib_path)?;
