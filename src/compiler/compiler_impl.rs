@@ -35,7 +35,7 @@ use crate::{
         constants::CALL_CONV,
         convert_type::convert_type_to_cranelift_type,
         function::{compile_function, make_signature},
-        generic::{GenericInfo, mangle_generic},
+        generic::{GenericInfo, mangle_generic, mangle_method},
         get_platform_width,
         handler::{
             compile_build_struct::{compile_build_struct, instantiate_struct},
@@ -255,6 +255,7 @@ impl<'a> Compiler<'a> {
                 | TypedStatement::Struct { .. }
                 | TypedStatement::Extern { .. }
                 | TypedStatement::Use { .. }
+                | TypedStatement::Impl { .. }
         ) {
             return true;
         } else if let TypedStatement::ExpressionStatement(_, id, _) = stmt {
@@ -656,6 +657,83 @@ impl<'a> Compiler<'a> {
                 Ok(())
             }
 
+            TypedStatement::Impl {
+                impl_,
+                for_,
+                block,
+                generics,
+                ..
+            } => {
+                if state.table.borrow_mut().get(&impl_.value).is_none()
+                    && state.generic_map.get(impl_.value.as_ref()).is_none()
+                {
+                    return Err(format!("cannot find type '{impl_}' in this scope"));
+                }
+
+                if let Some(for_) = for_
+                    && state.table.borrow_mut().get(&for_.value).is_none()
+                    && state.generic_map.get(for_.value.as_ref()).is_none()
+                {
+                    return Err(format!("cannot find type '{for_}' in this scope"));
+                }
+
+                let type_name = impl_.value.clone();
+
+                let block = state.get_stmt_ref(*block).clone();
+
+                let TypedStatement::Block { statements, .. } = block else {
+                    unreachable!();
+                };
+
+                for stmt in statements {
+                    let stmt = state.get_stmt_ref(stmt).clone();
+
+                    let TypedStatement::ExpressionStatement(_, expr, _) = stmt else {
+                        continue;
+                    };
+
+                    let expr = state.get_expr_ref(expr);
+
+                    let TypedExpression::Function {
+                        name: Some(fn_name),
+                        token,
+                        params,
+                        generics_params,
+                        block,
+                        ret_ty,
+                        ty,
+                    } = expr.clone()
+                    else {
+                        continue;
+                    };
+
+                    // mangling
+                    let mut new_name_token = fn_name.clone();
+                    new_name_token.value = format!("{}__{}", type_name, &fn_name.value).into();
+
+                    let mut combined_generics = generics.clone();
+                    combined_generics.extend(generics_params);
+
+                    let stmt = TypedStatement::ExpressionStatement(
+                        token.clone(),
+                        state.typed_module.alloc_expr(TypedExpression::Function {
+                            token,
+                            name: Some(new_name_token),
+                            params,
+                            generics_params: combined_generics,
+                            block,
+                            ret_ty,
+                            ty,
+                        }),
+                        ty,
+                    );
+
+                    Self::compile_top_level_stmt(state, &stmt)?;
+                }
+
+                Ok(())
+            }
+
             TypedStatement::Use { .. } => Ok(()),
 
             _ => todo!("impl function 'compile_stmt'"),
@@ -930,14 +1008,21 @@ impl<'a> Compiler<'a> {
             }
 
             TypedStatement::Impl {
-                impl_, for_, block, ..
+                impl_,
+                for_,
+                block,
+                generics,
+                ..
             } => {
-                if state.table.borrow_mut().get(&impl_.value).is_none() {
+                if state.table.borrow_mut().get(&impl_.value).is_none()
+                    && state.generic_map.get(impl_.value.as_ref()).is_none()
+                {
                     return Err(format!("cannot find type '{impl_}' in this scope"));
                 }
 
                 if let Some(for_) = for_
                     && state.table.borrow_mut().get(&for_.value).is_none()
+                    && state.generic_map.get(for_.value.as_ref()).is_none()
                 {
                     return Err(format!("cannot find type '{for_}' in this scope"));
                 }
@@ -976,13 +1061,16 @@ impl<'a> Compiler<'a> {
                     let mut new_name_token = fn_name.clone();
                     new_name_token.value = format!("{}__{}", type_name, &fn_name.value).into();
 
+                    let mut combined_generics = generics.clone();
+                    combined_generics.extend(generics_params);
+
                     Self::compile_expr(
                         state,
                         &TypedExpression::Function {
                             token,
                             name: Some(new_name_token),
                             params,
-                            generics_params,
+                            generics_params: combined_generics,
                             block,
                             ret_ty,
                             ty,
@@ -1925,7 +2013,11 @@ impl<'a> Compiler<'a> {
 
             match def {
                 Def::Function(data) => {
-                    let ty = state.get_typed_module_ref().tcx_ref().get(data.ty.get()).clone();
+                    let ty = state
+                        .get_typed_module_ref()
+                        .tcx_ref()
+                        .get(data.ty.get())
+                        .clone();
                     let Ty::Function {
                         generics,
                         params_type,
@@ -1953,6 +2045,12 @@ impl<'a> Compiler<'a> {
 
                         let symbol_name = if data.name.as_ref() == "main" {
                             "main".to_string()
+                        } else if let Some(parent) = data.parent
+                            && let Def::Impl(impl_data) = state.get_krate_ref().get_def(parent)
+                            && let Def::Struct(struct_data) =
+                                state.get_krate_ref().get_def(impl_data.target_def)
+                        {
+                            mangle_method(&data.name, &struct_data.name)
                         } else {
                             data.name.to_string()
                             // format!("__def_{id_idx}_{}", &data.name)
@@ -2010,7 +2108,10 @@ impl<'a> Compiler<'a> {
                                 .as_slice(),
                         )?;
 
-                        state.get_table().borrow_mut().define_struct_type(&data.name, layout);
+                        state
+                            .get_table()
+                            .borrow_mut()
+                            .define_struct_type(&data.name, layout);
                         continue;
                     }
 
@@ -2018,7 +2119,7 @@ impl<'a> Compiler<'a> {
                         data.name.to_string(),
                         GenericInfo::Struct {
                             generic_params: data.generics,
-                            fields: data.fields.clone()
+                            fields: data.fields.clone(),
                         },
                     );
                 }
