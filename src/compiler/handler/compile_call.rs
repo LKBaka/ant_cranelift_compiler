@@ -93,7 +93,10 @@ fn compile_call_generic(
         ..
     } = ty
     else {
-        return Err(format!("not a function: {}", display_ty(&ty, state.tcx_ref())));
+        return Err(format!(
+            "not a function: {}",
+            display_ty(&ty, state.tcx_ref())
+        ));
     };
 
     let name = &name_ident.value;
@@ -239,21 +242,16 @@ pub fn compile_call(
             _ => unreachable!(),
         };
 
-    if let TypedExpression::FieldAccess(_, obj, field, _) = func
-        && let Ty::Struct { name, fields, .. } = state
-            .typed_module
-            .tcx_ref()
-            .get(state.get_expr_ref(*obj).get_type())
-            .clone()
-        && let Some(Ty::Function {
-            params_type,
-            ret_type,
-            ..
-        }) = fields
-            .get(&field.value)
-            .and_then(|ty| Some(state.tcx_ref().get(*ty)))
-            .cloned()
-    {
+    if let TypedExpression::FieldAccess(_, obj, field, _) = func {
+        let obj_ty = state.resolve_concrete_ty(state.get_expr_ref(*obj).get_type(), state.subst);
+
+        // 提取结构体名称
+        let struct_name = match obj_ty {
+            Ty::Struct { name, .. } => name.clone(),
+            Ty::AppliedGeneric(name, _) => name.clone(),
+            _ => return Err(format!("call method on non-struct type")),
+        };
+
         return compile_call_method(
             state,
             func,
@@ -263,8 +261,8 @@ pub fn compile_call(
             &generics,
             field,
             &params_type,
-            &ret_type,
-            &name,
+            &ret_ty,
+            &struct_name,
         );
     }
 
