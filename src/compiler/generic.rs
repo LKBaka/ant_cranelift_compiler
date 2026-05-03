@@ -51,3 +51,11 @@ pub fn mangle_generic(name: &str, args: &[Ty]) -> String {
 
     res
 }
+
+pub fn mangle_method(name: &str, parent_ty: &str) -> String {
+    if parent_ty.is_empty() {
+        return name.to_string();
+    }
+
+    format!("{name}__{parent_ty}")
+}
