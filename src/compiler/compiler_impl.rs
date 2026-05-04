@@ -1630,7 +1630,7 @@ impl<'a> Compiler<'a> {
                             },
                         );
 
-                        return Ok(state.builder.ins().null(platform_width_to_int_type()));
+                        return Ok(state.builder.ins().iconst(platform_width_to_int_type(), 0));
                     }
 
                     let signature = make_signature(
