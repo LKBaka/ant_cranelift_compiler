@@ -157,9 +157,11 @@ pub fn compile_to_executable(
     use cc;
     use tempfile;
 
+	let arg = read_arg();
+    
     // 默认使用临时 .o；当 --keep-cache 开启时将 .o 保留在输出目录
-    let keep_cache = read_arg().map(|args| args.keep_cache).unwrap_or(false);
-    let compile_only = read_arg().map(|args|args.compile_only).unwrap_or(false);
+    let keep_cache = arg.as_ref().map(|args| args.keep_cache).unwrap_or(false);
+    let compile_only = arg.as_ref().map(|args|args.compile_only).unwrap_or(false);
     let _temp_dir_guard: Option<tempfile::TempDir>;
     let object_file_path = if keep_cache || compile_only {
         let parent = output_path.parent().unwrap_or(Path::new("."));
@@ -180,32 +182,33 @@ pub fn compile_to_executable(
 
     if !compile_only {
         #[cfg(target_os = "windows")]
-        let _target = "x86_64-pc-windows-gnu";
+        let normal_target = "x86_64-pc-windows-gnu";
 
         #[cfg(target_os = "linux")]
-        let _target = "x86_64-unknown-linux-gnu";
+        let normal_target = if cfg!(target_arch = "aarch64") {
+            "aarch64-unknown-linux-gnu"
+        } else {
+            "x86_64-unknown-linux-gnu"
+        };
 
+        
         #[cfg(target_os = "macos")]
-        let _target = if cfg!(target_arch = "aarch64") {
+        let normal_target = if cfg!(target_arch = "aarch64") {
             "aarch64-apple-darwin"
         } else {
             "x86_64-apple-darwin"
         };
 
-        let target: String;
-        let _usr_target: String;
-
-        if let Some(args) = read_arg() {
-            _usr_target = args.target_triple;
-            if _usr_target.is_empty() {
-                target = _target.to_string();
-            }
-            else {
-                target = _usr_target;
+        let target = if let Some(args) = &arg {
+            let usr_target = &args.target_triple;
+            if usr_target.is_empty() {
+                normal_target.to_string()
+            } else {
+        		usr_target.clone()
             }
         } else {
-            target = _target.to_string();
-        }
+            normal_target.to_string()
+        };
 
         // let _target: String = read_arg().map(|args|args.target_triple).unwrap_or(_target.to_string());
         // let target: &str = _target.as_str();
@@ -219,7 +222,7 @@ pub fn compile_to_executable(
             .cargo_metadata(false)
             .out_dir(output_path.parent().unwrap_or(Path::new("")));
 
-        if let Some(args) = read_arg() {
+        if let Some(args) = &arg {
             let opt = &args.opt_level;
 
             build.opt_level_str(&opt.0);
@@ -247,7 +250,7 @@ pub fn compile_to_executable(
         };
 
         let mut command = compiler.to_command();
-        if read_arg().map(|args|args.debug_info).unwrap_or(false) {
+        if arg.as_ref().map(|args| args.debug_info).unwrap_or(false) {
             command.arg("-g");
         }
         command
@@ -260,7 +263,7 @@ pub fn compile_to_executable(
             .arg("arc");
 
         // 用户额外链接库
-        if let Some(it) = read_arg() {
+        if let Some(it) = &arg {
             for path in &it.link_with {
                 command.arg("-L").arg(
                     PathBuf::from(path)
@@ -269,7 +272,7 @@ pub fn compile_to_executable(
                 );
             }
 
-            for lib in it.link_with {
+            for lib in &it.link_with {
                 if lib.trim().is_empty() {
                     continue;
                 }
@@ -296,11 +299,9 @@ pub fn compile_to_executable(
         {
             command.arg("-static").arg("-lmsvcrt");
         }
-
         
-
         // macOS: 不要 static / 不要 -lc（clang 自动处理）
-
+        
         command.status().expect("link failed");
 
         fs::remove_file(lib_path)?;
