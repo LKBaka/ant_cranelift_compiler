@@ -28,24 +28,13 @@ fn compile_call_method(
     func_ty: &TyId,
 
     original_func_ret_ty: &usize,
-    original_func_generics: &Vec<Arc<str>>,
 
     field: &Ident,
-
-    params_type: &Vec<usize>,
-    ret_type: &usize,
 
     name: &Arc<str>,
 ) -> CompileResult<Value> {
     // 函数名重命名
     let func_name = format!("{}__{}", name, field.value);
-
-    let func_ty_id = state.tcx().alloc(Ty::Function {
-        params_type: params_type.clone(),
-        ret_type: ret_type.clone(),
-        is_variadic: false,
-        generics: original_func_generics.clone(),
-    });
 
     let call_expr = TypedExpression::Call {
         token: Token::new(
@@ -70,8 +59,11 @@ fn compile_call_method(
             None,
         )),
         args: args.clone(),
-        func_ty: func_ty_id,
-        ret_ty: *original_func_ret_ty,
+        func_ty: *func_ty,
+        ret_ty: match state.tcx().get(*func_ty) {
+            Ty::Function { ret_type: actual_ret, .. } => *actual_ret,
+            _ => *original_func_ret_ty,
+        },
     };
 
     return Compiler::compile_expr(state, &call_expr);
@@ -230,15 +222,14 @@ pub fn compile_call(
     args: &Vec<ExprId>,
     func_ty: &TyId,
 ) -> CompileResult<Value> {
-    let (mut params_type, mut ret_ty, va_arg, generics) =
+    let (mut params_type, mut ret_ty, va_arg) =
         match state.tcx_ref().get(*func_ty).clone() {
             Ty::Function {
                 params_type,
                 ret_type,
                 is_variadic,
-                generics,
                 ..
-            } => (params_type.clone(), ret_type, is_variadic, generics),
+            } => (params_type.clone(), ret_type, is_variadic),
             _ => unreachable!(),
         };
 
@@ -258,10 +249,7 @@ pub fn compile_call(
             args,
             func_ty,
             &ret_ty,
-            &generics,
             field,
-            &params_type,
-            &ret_ty,
             &struct_name,
         );
     }
